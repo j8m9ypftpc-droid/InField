@@ -4,6 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>InField</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
@@ -15,7 +16,6 @@
         <div class="splash-art">
           <img src="./infield_splash2.png" alt="InField" />
         </div>
-        <div class="start-logo">InField</div>
         <p class="eyebrow">Åtgärdskartering</p>
         <div class="start-new">
           <label for="start-watercourse-input">Nytt vattendrag</label>
@@ -38,6 +38,7 @@
     </section>
     <main class="app-shell">
       <section class="map-pane" aria-label="Karta">
+        <div id="background-map" aria-hidden="true"></div>
         <div class="map-toolbar">
           <button class="icon-button active" id="tool-section" title="Delsträcka" aria-label="Delsträcka">
             <span>⌁</span>
@@ -196,6 +197,7 @@
       </aside>
     </main>
 
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="./app.js"></script>
   </body>
 </html>

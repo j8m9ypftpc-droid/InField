@@ -197,6 +197,8 @@ const fallbackObjectTypes = [
   "Åtgärdspunkt",
 ];
 
+const defaultMapCenter = [60.965, 16.44];
+
 const state = {
   nextSectionNumber: 1,
   activeSection: null,
@@ -327,16 +329,16 @@ function svgPoint(event) {
 }
 
 function projectGpsToMap(position) {
-  const baseLat = 60.965;
-  const baseLon = 16.44;
+  const baseLat = defaultMapCenter[0];
+  const baseLon = defaultMapCenter[1];
   const x = 500 + (position.coords.longitude - baseLon) * 12000 + state.mapOffset[0];
   const y = 390 - (position.coords.latitude - baseLat) * 18000 + state.mapOffset[1];
   return [Math.max(20, Math.min(980, x)), Math.max(20, Math.min(760, y))];
 }
 
 function mapPointToGeo(point) {
-  const baseLat = 60.965;
-  const baseLon = 16.44;
+  const baseLat = defaultMapCenter[0];
+  const baseLon = defaultMapCenter[1];
   const lon = baseLon + (point[0] - state.mapOffset[0] - 500) / 12000;
   const lat = baseLat - (point[1] - state.mapOffset[1] - 390) / 18000;
   return [Number(lon.toFixed(7)), Number(lat.toFixed(7))];
@@ -414,6 +416,28 @@ function makeSvg(name, attributes = {}) {
   const element = document.createElementNS("http://www.w3.org/2000/svg", name);
   Object.entries(attributes).forEach(([key, value]) => element.setAttribute(key, value));
   return element;
+}
+
+function initBackgroundMap() {
+  if (!window.L) return;
+  const background = window.L.map("background-map", {
+    center: defaultMapCenter,
+    zoom: 14,
+    zoomControl: true,
+    attributionControl: true,
+    dragging: false,
+    scrollWheelZoom: false,
+    doubleClickZoom: false,
+    boxZoom: false,
+    keyboard: false,
+    tap: false,
+    touchZoom: false,
+  });
+  window.L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19,
+    attribution: "&copy; OpenStreetMap contributors",
+  }).addTo(background);
+  state.backgroundMap = background;
 }
 
 function storageKey(name = state.watercourse) {
@@ -1432,6 +1456,7 @@ function endDrag() {
 }
 
 supportLine.setAttribute("d", pathFromPoints(supportPoints));
+initBackgroundMap();
 renderProtocolFields();
 updateObjectTypeSelect("point", "Bestämmande sektion");
 renderProjectList();
