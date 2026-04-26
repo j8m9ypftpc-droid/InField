@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="sv">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>InField</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <section id="start-screen" class="start-screen">
+      <button id="splash-cover" class="splash-cover" aria-label="Gå vidare till projekt">
+        <img src="./infield_splash2.png" alt="InField" />
+      </button>
+      <div class="start-panel">
+        <div class="splash-art">
+          <img src="./infield_splash2.png" alt="InField" />
+        </div>
+        <div class="start-logo">InField</div>
+        <p class="eyebrow">Åtgärdskartering</p>
+        <div class="start-new">
+          <label for="start-watercourse-input">Nytt vattendrag</label>
+          <div class="project-picker">
+            <input id="start-watercourse-input" type="text" placeholder="Namn på vattendrag" />
+            <button id="start-new-button" class="primary-button">Starta</button>
+          </div>
+        </div>
+        <div class="start-projects">
+          <h2>Lokalt sparade vattendrag</h2>
+          <div class="project-picker saved-picker">
+            <select id="saved-project-select">
+              <option value="">Välj sparat vattendrag</option>
+            </select>
+            <button id="open-selected-project-button" class="quiet-button">Öppna</button>
+          </div>
+          <ul id="project-list" class="item-list"></ul>
+        </div>
+      </div>
+    </section>
+    <main class="app-shell">
+      <section class="map-pane" aria-label="Karta">
+        <div class="map-toolbar">
+          <button class="icon-button active" id="tool-section" title="Delsträcka" aria-label="Delsträcka">
+            <span>⌁</span>
+          </button>
+          <button class="icon-button" id="tool-point" title="Punktobjekt" aria-label="Punktobjekt">
+            <span>•</span>
+          </button>
+          <button class="icon-button" id="tool-line" title="Linjeobjekt" aria-label="Linjeobjekt">
+            <span>╱</span>
+          </button>
+          <button class="icon-button" id="tool-area" title="Ytobjekt" aria-label="Ytobjekt">
+            <span>▱</span>
+          </button>
+          <button class="icon-button" id="tool-photo" title="Foto" aria-label="Foto">
+            <span>📷</span>
+          </button>
+        </div>
+        <input id="map-photo-input" type="file" accept="image/*" capture="environment" hidden />
+        <svg id="map" viewBox="0 0 1000 780" role="img" aria-label="Karteringsyta med stödlinje">
+          <defs>
+            <pattern id="grid" width="42" height="42" patternUnits="userSpaceOnUse">
+              <path d="M 42 0 L 0 0 0 42" fill="none" stroke="#d9ded8" stroke-width="1" />
+            </pattern>
+          </defs>
+          <rect width="1000" height="780" fill="#eef1e9" />
+          <rect width="1000" height="780" fill="url(#grid)" opacity="0.7" />
+          <path class="terrain-band" d="M0,545 C180,510 220,610 390,575 C570,540 650,440 1000,490 L1000,780 L0,780 Z" />
+          <path class="terrain-band light" d="M0,120 C190,150 330,115 470,150 C665,196 770,110 1000,155 L1000,0 L0,0 Z" />
+          <g id="objects-layer"></g>
+          <g id="sections-layer"></g>
+          <path id="support-line" class="support-line" />
+          <g id="gps-layer"></g>
+          <g id="vertices-layer"></g>
+          <g id="preview-layer"></g>
+        </svg>
+        <div class="map-status">
+          <span id="map-hint">Välj start och stopp på stödlinjen.</span>
+          <span id="length-label">0 m</span>
+        </div>
+      </section>
+
+      <aside class="side-pane" aria-label="Protokoll">
+        <header class="project-header">
+          <div>
+            <p class="eyebrow" id="watercourse-label">Bresiljeån</p>
+            <h1>Delsträcka <span id="section-number">1</span></h1>
+          </div>
+          <div class="header-actions">
+            <button id="gps-toggle-button" class="quiet-button">GPS av</button>
+            <button id="center-gps-button" class="quiet-button">Centrera</button>
+            <button id="switch-project-button" class="quiet-button">Byt vattendrag</button>
+            <button id="export-button" class="quiet-button">Export</button>
+          </div>
+        </header>
+
+        <section class="project-card">
+          <label for="watercourse-input">Vattendrag</label>
+          <div class="project-picker">
+            <input id="watercourse-input" type="text" value="Bresiljeån" />
+            <button id="open-watercourse-button" class="quiet-button">Öppna</button>
+          </div>
+          <div class="project-actions">
+            <button id="new-watercourse-button" class="secondary-button">Nytt vattendrag</button>
+          </div>
+          <div class="project-meta">
+            <label for="project-inventor">Utförare/inventerare</label>
+            <input id="project-inventor" type="text" placeholder="Namn" />
+            <label for="project-machine">Maskinstorlek</label>
+            <select id="project-machine">
+              <option value="">Välj vid behov</option>
+              <option>Mindre</option>
+              <option>15-17</option>
+              <option>17-20</option>
+              <option>20-25</option>
+              <option>25-30</option>
+              <option>30-&gt;</option>
+            </select>
+            <label>Schaktmaskin</label>
+            <div class="choice-grid binary project-choice">
+              <button type="button" class="choice-button active" data-project-field="excavator" data-value="Nej">Nej</button>
+              <button type="button" class="choice-button" data-project-field="excavator" data-value="Ja">Ja</button>
+            </div>
+            <details class="geo-settings">
+              <summary>Koordinater</summary>
+              <p>Koordinater följer automatiskt med för delsträckor, objekt och foton i exporten. Foton får telefonens GPS-position om GPS är på.</p>
+            </details>
+          </div>
+          <span id="save-state-label">Sparas lokalt i denna webbläsare</span>
+        </section>
+
+        <section class="status-card">
+          <div>
+            <span class="label">Aktiv sträcka</span>
+            <strong id="active-state">Ej startad</strong>
+          </div>
+          <button id="start-stop-button" class="primary-button">Starta</button>
+        </section>
+
+        <nav class="tabs" aria-label="Vy">
+          <button class="tab active" data-tab="protocol">Protokoll</button>
+          <button class="tab" data-tab="objects">Objekt</button>
+          <button class="tab" data-tab="sections">Sträckor</button>
+        </nav>
+
+        <section id="protocol-panel" class="panel active">
+          <div class="photo-panel">
+            <button id="add-section-photo-button" class="secondary-button">Lägg till foto</button>
+            <input id="section-photo-input" type="file" accept="image/*" capture="environment" hidden />
+            <div id="section-photo-list" class="photo-list"></div>
+          </div>
+          <div id="protocol-fields"></div>
+        </section>
+
+        <section id="objects-panel" class="panel">
+          <p id="object-section-label" class="context-label">Ingen aktiv delsträcka</p>
+          <div class="object-actions">
+            <button class="secondary-button" data-object-tool="point">Ny punkt</button>
+            <button class="secondary-button" data-object-tool="line">Ny linje</button>
+            <button class="secondary-button" data-object-tool="area">Ny yta</button>
+          </div>
+          <div class="draw-actions">
+            <button id="undo-draw-button" class="quiet-button" disabled>Bakåt</button>
+            <button id="finish-draw-button" class="quiet-button" disabled>Klar</button>
+            <button id="cancel-draw-button" class="quiet-button" disabled>Avbryt</button>
+          </div>
+          <div class="field-group">
+            <label for="object-type">Objekttyp</label>
+            <select id="object-type">
+              <option>Vandringshinder</option>
+              <option>Trumma</option>
+              <option>Erosion</option>
+              <option>Sidofåra</option>
+              <option>Kvill</option>
+              <option>Översvämningsyta</option>
+              <option>Åtgärdspunkt</option>
+            </select>
+          </div>
+          <div class="field-group">
+            <label for="object-comment">Objektkommentar</label>
+            <textarea id="object-comment" rows="3" placeholder="Kommentar till nästa objekt"></textarea>
+          </div>
+          <div class="object-edit-actions">
+            <button id="save-object-button" class="secondary-button" disabled>Spara objekt</button>
+            <button id="cancel-object-edit-button" class="quiet-button" disabled>Avmarkera</button>
+          </div>
+          <div class="photo-panel">
+            <button id="add-object-photo-button" class="secondary-button" disabled>Lägg till foto på valt objekt</button>
+            <input id="object-photo-input" type="file" accept="image/*" capture="environment" hidden />
+          </div>
+          <ul id="object-list" class="item-list"></ul>
+        </section>
+
+        <section id="sections-panel" class="panel">
+          <ul id="section-list" class="item-list"></ul>
+        </section>
+      </aside>
+    </main>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
