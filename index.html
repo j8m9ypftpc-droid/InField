@@ -39,8 +39,12 @@
     <main class="app-shell">
       <section class="map-pane" aria-label="Karta">
         <div id="background-map" aria-hidden="true"></div>
-        <div class="map-toolbar">
-          <button class="icon-button active" id="tool-section" title="Delsträcka" aria-label="Delsträcka">
+        <button id="tool-menu-button" class="tool-menu-button" type="button" aria-expanded="false">Verktyg</button>
+        <div id="map-toolbar" class="map-toolbar collapsed">
+          <button class="icon-button active" id="tool-pan" title="Flytta karta" aria-label="Flytta karta">
+            <span>✋</span>
+          </button>
+          <button class="icon-button" id="tool-section" title="Delsträcka" aria-label="Delsträcka">
             <span>⌁</span>
           </button>
           <button class="icon-button" id="tool-point" title="Punktobjekt" aria-label="Punktobjekt">
@@ -75,7 +79,7 @@
           <g id="preview-layer"></g>
         </svg>
         <div class="map-status">
-          <span id="map-hint">Välj grön startpunkt och röd stoppunkt i kartan.</span>
+          <span id="map-hint">Flytta och zooma kartan.</span>
           <span id="length-label">0 m</span>
         </div>
       </section>
@@ -136,7 +140,7 @@
           <div>
             <span class="label">Aktiv sträcka</span>
             <strong id="active-state">Ej startad</strong>
-            <p id="side-map-hint" class="status-hint">Välj grön startpunkt och röd stoppunkt i kartan.</p>
+            <p id="side-map-hint" class="status-hint">Flytta och zooma kartan.</p>
           </div>
           <button id="start-stop-button" class="primary-button">Starta</button>
         </section>
@@ -202,6 +206,7 @@
     </main>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/jszip@3.10.1/dist/jszip.min.js"></script>
     <script src="./app.js"></script>
   </body>
 </html>

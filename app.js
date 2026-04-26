@@ -205,17 +205,20 @@ const state = {
   sections: [],
   objects: [],
   photos: [],
-  tool: "section",
+  tool: "pan",
   tempObject: null,
   dragging: null,
   gpsEnabled: false,
   gpsWatchId: null,
   gpsPosition: null,
+  hasCenteredOnGps: false,
   mapOffset: [0, 0],
   useSupportLine: false,
 };
 
 const map = document.querySelector("#map");
+const mapToolbar = document.querySelector("#map-toolbar");
+const toolMenuButton = document.querySelector("#tool-menu-button");
 const startScreen = document.querySelector("#start-screen");
 const splashCover = document.querySelector("#splash-cover");
 const projectList = document.querySelector("#project-list");
@@ -380,6 +383,7 @@ function toggleGps() {
     if (state.gpsWatchId !== null) navigator.geolocation.clearWatch(state.gpsWatchId);
     state.gpsEnabled = false;
     state.gpsWatchId = null;
+    state.hasCenteredOnGps = false;
     render();
     return;
   }
@@ -391,6 +395,10 @@ function toggleGps() {
   state.gpsWatchId = navigator.geolocation.watchPosition(
     (position) => {
       state.gpsPosition = position;
+      if (state.backgroundMap && !state.hasCenteredOnGps) {
+        state.backgroundMap.setView([position.coords.latitude, position.coords.longitude], Math.max(state.backgroundMap.getZoom(), 16));
+        state.hasCenteredOnGps = true;
+      }
       render();
     },
     () => {
@@ -448,7 +456,7 @@ function initBackgroundMap() {
   const background = window.L.map("background-map", {
     center: defaultMapCenter,
     zoom: 14,
-    zoomControl: true,
+    zoomControl: false,
     attributionControl: true,
     dragging: true,
     scrollWheelZoom: true,
@@ -462,6 +470,7 @@ function initBackgroundMap() {
     maxZoom: 19,
     attribution: "&copy; OpenStreetMap contributors",
   }).addTo(background);
+  window.L.control.zoom({ position: "bottomright" }).addTo(background);
   background.on("move zoom", renderGps);
   state.backgroundMap = background;
   map.classList.add("map-dimmed");
@@ -661,9 +670,14 @@ function setTool(tool) {
   state.tempObject = null;
   if (["point", "line", "area"].includes(tool)) updateObjectTypeSelect(tool);
   document.querySelectorAll(".icon-button").forEach((button) => button.classList.remove("active"));
-  document.querySelector(`#tool-${tool}`).classList.add("active");
+  document.querySelector(`#tool-${tool}`)?.classList.add("active");
+  map.classList.toggle("drawing-active", tool !== "pan");
+  mapToolbar.classList.add("collapsed");
+  toolMenuButton.setAttribute("aria-expanded", "false");
   mapHint.textContent =
-    tool === "section"
+    tool === "pan"
+      ? "Flytta och zooma kartan."
+      : tool === "section"
       ? "Välj grön startpunkt och röd stoppunkt i kartan."
       : tool === "photo"
         ? "Klicka i kartan för att ta foto kopplat till aktiv sträcka."
@@ -1334,7 +1348,7 @@ function objectCoordinateSummary(geometry) {
   return pointSummary(coords);
 }
 
-function exportGeoJson(projectPayload = null) {
+async function exportGeoJson(projectPayload = null) {
   syncFormToProtocol();
   const exportState = projectPayload
     ? {
@@ -1401,32 +1415,36 @@ function exportGeoJson(projectPayload = null) {
     gpsAccuracy: photo.gpsAccuracy ?? null,
     embedded: true,
   }));
-  const safeName = exportState.watercourse.toLowerCase().replaceAll(" ", "-");
+  const safeName = safeFilename(exportState.watercourse);
   const layers = [
     ["delstrackor", sectionFeatures],
     ["punktobjekt", objectFeatures.filter((feature) => feature.geometry.type === "Point")],
     ["linjeobjekt", objectFeatures.filter((feature) => feature.geometry.type === "LineString")],
     ["ytobjekt", objectFeatures.filter((feature) => feature.geometry.type === "Polygon")],
   ];
+  const metadata = {
+    vattendrag: exportState.watercourse,
+    exporterad: new Date().toISOString(),
+    inventor: exportState.projectMeta?.inventor ?? "",
+    maskin: exportState.projectMeta?.machineSize ?? "",
+    schaktmaskin: exportState.projectMeta?.excavator ?? "Nej",
+    koordinater: coordinateSystem,
+    stodlinje: state.useSupportLine ? "tillfallig" : "ingen",
+    delstrackor: sectionFeatures.length,
+    punktobjekt: layers[1][1].length,
+    linjeobjekt: layers[2][1].length,
+    ytobjekt: layers[3][1].length,
+    foton: photoMetadata.length,
+  };
+  if (window.JSZip) {
+    await downloadZipPackage(safeName, exportState, layers, metadata, photoMetadata);
+    openExportMail(exportState.watercourse, `${safeName}-gis-export.zip`);
+    return;
+  }
   layers.forEach(([name, features], index) => {
     setTimeout(() => downloadJson(`${safeName}-${name}.geojson`, { type: "FeatureCollection", features }), index * 200);
   });
-  setTimeout(() => {
-    downloadJson(`${safeName}-metadata.json`, {
-      vattendrag: exportState.watercourse,
-      exporterad: new Date().toISOString(),
-      inventor: exportState.projectMeta?.inventor ?? "",
-      maskin: exportState.projectMeta?.machineSize ?? "",
-      schaktmaskin: exportState.projectMeta?.excavator ?? "Nej",
-      koordinater: coordinateSystem,
-      stodlinje: state.useSupportLine ? "tillfallig" : "ingen",
-      delstrackor: sectionFeatures.length,
-      punktobjekt: layers[1][1].length,
-      linjeobjekt: layers[2][1].length,
-      ytobjekt: layers[3][1].length,
-      foton: photoMetadata.length,
-    });
-  }, layers.length * 200);
+  setTimeout(() => downloadJson(`${safeName}-metadata.json`, metadata), layers.length * 200);
   setTimeout(() => downloadJson(`${safeName}-foton-metadata.json`, photoMetadata), (layers.length + 1) * 200);
 }
 
@@ -1440,7 +1458,67 @@ function downloadJson(filename, data) {
   URL.revokeObjectURL(url);
 }
 
+function safeFilename(name) {
+  return name
+    .toLowerCase()
+    .trim()
+    .replaceAll("å", "a")
+    .replaceAll("ä", "a")
+    .replaceAll("ö", "o")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "") || "infield";
+}
+
+async function downloadZipPackage(safeName, exportState, layers, metadata, photoMetadata) {
+  const zip = new JSZip();
+  const gisFolder = zip.folder("gis");
+  const photoFolder = zip.folder("foton");
+  layers.forEach(([name, features]) => {
+    gisFolder.file(`${safeName}-${name}.geojson`, JSON.stringify({ type: "FeatureCollection", features }, null, 2));
+  });
+  zip.file(`${safeName}-metadata.json`, JSON.stringify(metadata, null, 2));
+  zip.file(`${safeName}-foton-metadata.json`, JSON.stringify(photoMetadata, null, 2));
+  (exportState.photos ?? []).forEach((photo, index) => {
+    if (!photo.dataUrl) return;
+    const extension = photoExtension(photo);
+    const filename = `${String(index + 1).padStart(3, "0")}-${safeFilename(photo.filename || photo.id)}.${extension}`;
+    photoFolder.file(filename, dataUrlBase64(photo.dataUrl), { base64: true });
+  });
+  const blob = await zip.generateAsync({ type: "blob", compression: "DEFLATE", compressionOptions: { level: 6 } });
+  downloadBlob(`${safeName}-gis-export.zip`, blob);
+}
+
+function photoExtension(photo) {
+  const fromName = (photo.filename ?? "").split(".").pop()?.toLowerCase();
+  if (fromName && fromName.length <= 5) return fromName;
+  if (photo.mimeType === "image/png") return "png";
+  if (photo.mimeType === "image/webp") return "webp";
+  return "jpg";
+}
+
+function dataUrlBase64(dataUrl) {
+  return String(dataUrl).split(",")[1] ?? "";
+}
+
+function downloadBlob(filename, blob) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 500);
+}
+
+function openExportMail(watercourse, zipName) {
+  const subject = encodeURIComponent(`InField export ${watercourse}`);
+  const body = encodeURIComponent(
+    `Hej,\n\nJag bifogar InField-exporten för ${watercourse}.\n\nZipfil att bifoga: ${zipName}\n\nZipfilen innehåller GeoJSON-lager, foton och metadata.`,
+  );
+  window.location.href = `mailto:?subject=${subject}&body=${body}`;
+}
+
 function handleMapClick(event) {
+  if (state.tool === "pan") return;
   if (event.target.dataset.objectId) {
     selectObject(event.target.dataset.objectId);
     return;
@@ -1506,6 +1584,11 @@ document.querySelectorAll(".tab").forEach((tab) => {
 
 document.querySelectorAll(".icon-button").forEach((button) => {
   button.addEventListener("click", () => setTool(button.id.replace("tool-", "")));
+});
+
+toolMenuButton.addEventListener("click", () => {
+  const collapsed = mapToolbar.classList.toggle("collapsed");
+  toolMenuButton.setAttribute("aria-expanded", String(!collapsed));
 });
 
 document.querySelectorAll("[data-object-tool]").forEach((button) => {
