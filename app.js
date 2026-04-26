@@ -212,6 +212,7 @@ const state = {
   gpsWatchId: null,
   gpsPosition: null,
   mapOffset: [0, 0],
+  useSupportLine: false,
 };
 
 const map = document.querySelector("#map");
@@ -233,6 +234,7 @@ const sectionNumber = document.querySelector("#section-number");
 const activeState = document.querySelector("#active-state");
 const startStopButton = document.querySelector("#start-stop-button");
 const mapHint = document.querySelector("#map-hint");
+const sideMapHint = document.querySelector("#side-map-hint");
 const lengthLabel = document.querySelector("#length-label");
 const gpsToggleButton = document.querySelector("#gps-toggle-button");
 const centerGpsButton = document.querySelector("#center-gps-button");
@@ -329,6 +331,10 @@ function svgPoint(event) {
 }
 
 function projectGpsToMap(position) {
+  if (state.backgroundMap) {
+    const point = state.backgroundMap.latLngToContainerPoint([position.coords.latitude, position.coords.longitude]);
+    return containerPointToSvg([point.x, point.y]);
+  }
   const baseLat = defaultMapCenter[0];
   const baseLon = defaultMapCenter[1];
   const x = 500 + (position.coords.longitude - baseLon) * 12000 + state.mapOffset[0];
@@ -337,6 +343,10 @@ function projectGpsToMap(position) {
 }
 
 function mapPointToGeo(point) {
+  if (state.backgroundMap) {
+    const latLng = state.backgroundMap.containerPointToLatLng(svgPointToContainer(point));
+    return [Number(latLng.lng.toFixed(7)), Number(latLng.lat.toFixed(7))];
+  }
   const baseLat = defaultMapCenter[0];
   const baseLon = defaultMapCenter[1];
   const lon = baseLon + (point[0] - state.mapOffset[0] - 500) / 12000;
@@ -344,10 +354,20 @@ function mapPointToGeo(point) {
   return [Number(lon.toFixed(7)), Number(lat.toFixed(7))];
 }
 
+function svgPointToContainer(point) {
+  const rect = map.getBoundingClientRect();
+  return [(point[0] / 1000) * rect.width, (point[1] / 780) * rect.height];
+}
+
+function containerPointToSvg(point) {
+  const rect = map.getBoundingClientRect();
+  return [(point[0] / rect.width) * 1000, (point[1] / rect.height) * 780];
+}
+
 function renderGps() {
   gpsLayer.innerHTML = "";
-  gpsToggleButton.textContent = state.gpsEnabled ? "GPS på" : "GPS av";
   gpsToggleButton.classList.toggle("active", state.gpsEnabled);
+  gpsToggleButton.setAttribute("aria-pressed", String(state.gpsEnabled));
   if (!state.gpsPosition) return;
   const [x, y] = projectGpsToMap(state.gpsPosition);
   const accuracy = Math.max(16, Math.min(90, (state.gpsPosition.coords.accuracy ?? 20) / 2));
@@ -388,6 +408,11 @@ function centerOnGps() {
     mapHint.textContent = "Slå på GPS och vänta på position först.";
     return;
   }
+  if (state.backgroundMap) {
+    state.backgroundMap.setView([state.gpsPosition.coords.latitude, state.gpsPosition.coords.longitude], Math.max(state.backgroundMap.getZoom(), 16));
+    render();
+    return;
+  }
   const [x, y] = projectGpsToMap(state.gpsPosition);
   state.mapOffset[0] += 500 - x;
   state.mapOffset[1] += 390 - y;
@@ -425,19 +450,21 @@ function initBackgroundMap() {
     zoom: 14,
     zoomControl: true,
     attributionControl: true,
-    dragging: false,
-    scrollWheelZoom: false,
-    doubleClickZoom: false,
-    boxZoom: false,
-    keyboard: false,
-    tap: false,
-    touchZoom: false,
+    dragging: true,
+    scrollWheelZoom: true,
+    doubleClickZoom: true,
+    boxZoom: true,
+    keyboard: true,
+    tap: true,
+    touchZoom: true,
   });
   window.L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
     maxZoom: 19,
     attribution: "&copy; OpenStreetMap contributors",
   }).addTo(background);
+  background.on("move zoom", renderGps);
   state.backgroundMap = background;
+  map.classList.add("map-dimmed");
 }
 
 function storageKey(name = state.watercourse) {
@@ -637,7 +664,7 @@ function setTool(tool) {
   document.querySelector(`#tool-${tool}`).classList.add("active");
   mapHint.textContent =
     tool === "section"
-      ? "Välj start och stopp på stödlinjen."
+      ? "Välj grön startpunkt och röd stoppunkt i kartan."
       : tool === "photo"
         ? "Klicka i kartan för att ta foto kopplat till aktiv sträcka."
       : "Klicka i kartan för att lägga till objekt på aktiv sträcka.";
@@ -1177,12 +1204,13 @@ function renderStatus() {
     mapHint.textContent = state.activeSection.editingExisting
       ? "Redigera linjen eller protokollet och tryck Spara och avsluta."
       : !state.activeSection.startConfirmed
-      ? "Klicka på stödlinjen för grön startpunkt och bekräfta med Starta sträcka."
-      : "Klicka på stödlinjen för röd stoppunkt och avsluta delsträckan.";
+      ? "Klicka i kartan för grön startpunkt och bekräfta med Starta sträcka."
+      : "Klicka i kartan för röd stoppunkt och avsluta delsträckan.";
   }
   const objectIsSelected = Boolean(state.selectedObjectId);
   saveObjectButton.disabled = !objectIsSelected;
   cancelObjectEditButton.disabled = !objectIsSelected;
+  sideMapHint.textContent = mapHint.textContent;
 }
 
 function render() {
@@ -1318,7 +1346,7 @@ function exportGeoJson(projectPayload = null) {
         photos: projectPayload.photos ?? [],
       }
     : state;
-  const coordinateSystem = "WGS84 lon/lat (EPSG:4326) från kartans nuvarande stödlinje";
+  const coordinateSystem = "WGS84 lon/lat (EPSG:4326) från kartans nuvarande position";
   const exportSections = [...(exportState.sections ?? []), exportState.activeSection].filter(
     (section) => section && section.points?.length > 1,
   );
@@ -1391,7 +1419,7 @@ function exportGeoJson(projectPayload = null) {
       maskin: exportState.projectMeta?.machineSize ?? "",
       schaktmaskin: exportState.projectMeta?.excavator ?? "Nej",
       koordinater: coordinateSystem,
-      stodlinje: "tillfallig",
+      stodlinje: state.useSupportLine ? "tillfallig" : "ingen",
       delstrackor: sectionFeatures.length,
       punktobjekt: layers[1][1].length,
       linjeobjekt: layers[2][1].length,
@@ -1421,12 +1449,16 @@ function handleMapClick(event) {
   const point = svgPoint(event);
   if (state.tool === "section") {
     if (!state.activeSection) return;
-    const snapped = snapToSupport(point);
+    const snapped = state.useSupportLine ? snapToSupport(point) : { point };
     if (!state.activeSection.startConfirmed) {
       state.activeSection.points = [snapped.point];
     } else {
-      const startSnap = snapToSupport(state.activeSection.points[0]);
-      state.activeSection.points = supportSlice(startSnap, snapped);
+      if (state.useSupportLine) {
+        const startSnap = snapToSupport(state.activeSection.points[0]);
+        state.activeSection.points = supportSlice(startSnap, snapped);
+      } else {
+        state.activeSection.points = [state.activeSection.points[0], point];
+      }
     }
   } else if (state.tool === "point") {
     addObjectPoint(point);
@@ -1446,7 +1478,8 @@ function startDrag(event) {
 function moveDrag(event) {
   if (state.dragging === null || !state.activeSection) return;
   const point = svgPoint(event);
-  state.activeSection.points[state.dragging] = event.shiftKey ? point : snapToSupport(point).point;
+  state.activeSection.points[state.dragging] =
+    state.useSupportLine && !event.shiftKey ? snapToSupport(point).point : point;
   render();
 }
 
@@ -1456,6 +1489,7 @@ function endDrag() {
 }
 
 supportLine.setAttribute("d", pathFromPoints(supportPoints));
+supportLine.classList.toggle("hidden", !state.useSupportLine);
 initBackgroundMap();
 renderProtocolFields();
 updateObjectTypeSelect("point", "Bestämmande sektion");

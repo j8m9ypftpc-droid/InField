@@ -57,7 +57,7 @@
           </button>
         </div>
         <input id="map-photo-input" type="file" accept="image/*" capture="environment" hidden />
-        <svg id="map" viewBox="0 0 1000 780" role="img" aria-label="Karteringsyta med stödlinje">
+        <svg id="map" viewBox="0 0 1000 780" role="img" aria-label="Karteringsyta">
           <defs>
             <pattern id="grid" width="42" height="42" patternUnits="userSpaceOnUse">
               <path d="M 42 0 L 0 0 0 42" fill="none" stroke="#d9ded8" stroke-width="1" />
@@ -75,7 +75,7 @@
           <g id="preview-layer"></g>
         </svg>
         <div class="map-status">
-          <span id="map-hint">Välj start och stopp på stödlinjen.</span>
+          <span id="map-hint">Välj grön startpunkt och röd stoppunkt i kartan.</span>
           <span id="length-label">0 m</span>
         </div>
       </section>
@@ -87,7 +87,10 @@
             <h1>Delsträcka <span id="section-number">1</span></h1>
           </div>
           <div class="header-actions">
-            <button id="gps-toggle-button" class="quiet-button">GPS av</button>
+            <button id="gps-toggle-button" class="switch-control" type="button" aria-pressed="false">
+              <span class="switch-track"><span class="switch-thumb"></span></span>
+              <span class="switch-label">GPS</span>
+            </button>
             <button id="center-gps-button" class="quiet-button">Centrera</button>
             <button id="switch-project-button" class="quiet-button">Byt vattendrag</button>
             <button id="export-button" class="quiet-button">Export</button>
@@ -133,6 +136,7 @@
           <div>
             <span class="label">Aktiv sträcka</span>
             <strong id="active-state">Ej startad</strong>
+            <p id="side-map-hint" class="status-hint">Välj grön startpunkt och röd stoppunkt i kartan.</p>
           </div>
           <button id="start-stop-button" class="primary-button">Starta</button>
         </section>

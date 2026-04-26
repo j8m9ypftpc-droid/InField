@@ -150,6 +150,10 @@ input {
   touch-action: none;
 }
 
+#map.map-dimmed {
+  background: transparent;
+}
+
 #map > rect {
   fill-opacity: 0;
 }
@@ -167,10 +171,15 @@ input {
 .support-line {
   fill: none;
   stroke: var(--water);
-  stroke-width: 12;
+  stroke-width: 8;
   stroke-linecap: round;
   stroke-linejoin: round;
-  opacity: 0.7;
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+.support-line.hidden {
+  display: none;
 }
 
 .section-line {
@@ -269,6 +278,55 @@ input {
   justify-content: flex-end;
 }
 
+.switch-control {
+  height: 38px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+  padding: 0 10px;
+  cursor: pointer;
+}
+
+.switch-track {
+  width: 42px;
+  height: 24px;
+  border-radius: 999px;
+  background: #c8d0c8;
+  padding: 3px;
+  transition: background 0.18s ease;
+}
+
+.switch-thumb {
+  display: block;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 4px rgba(23, 33, 28, 0.2);
+  transition: transform 0.18s ease;
+}
+
+.switch-control.active {
+  border-color: #1f9d55;
+}
+
+.switch-control.active .switch-track {
+  background: #1f9d55;
+}
+
+.switch-control.active .switch-thumb {
+  transform: translateX(18px);
+}
+
+.switch-label {
+  font-weight: 700;
+  font-size: 14px;
+}
+
 .switch-button {
   width: 46px;
   height: 26px;
@@ -335,14 +393,14 @@ input {
 
 .map-status {
   position: absolute;
-  left: 18px;
-  right: auto;
+  left: auto;
+  right: 18px;
   bottom: 18px;
-  max-width: min(420px, calc(100% - 36px));
+  max-width: none;
   display: flex;
   justify-content: space-between;
-  gap: 16px;
-  padding: 8px 10px;
+  gap: 0;
+  padding: 7px 10px;
   background: rgba(255, 255, 255, 0.94);
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -353,13 +411,19 @@ input {
 }
 
 #map-hint {
-  overflow: hidden;
-  text-overflow: ellipsis;
+  display: none;
 }
 
 #length-label {
   white-space: nowrap;
   font-weight: 700;
+}
+
+.status-hint {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.35;
 }
 
 .side-pane {
