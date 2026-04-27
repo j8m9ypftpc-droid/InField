@@ -158,6 +158,16 @@ const protocolGroups = [
   {
     title: "Åtgärder och beskrivning",
     fields: [
+      { key: "atgardsbehov", label: "Åtgärdsbehov", type: "binary" },
+      { key: "ersattningsmaterialStracka", label: "Behövs ersättningsmaterial på sträckan?", type: "binary", showIf: (a) => String(a.hymotyp ?? "").startsWith("B") },
+      { key: "ersattningsmaterialMangd", label: "Mängd ersättningsmaterial", type: "text", showIf: (a) => String(a.hymotyp ?? "").startsWith("B") && a.ersattningsmaterialStracka === "Ja" },
+      {
+        key: "ersattningsmaterialFraktion",
+        label: "Fraktion",
+        type: "buttons",
+        options: ["0-32", "32-64", "64-128", "128-256", "256-512", "Block", "Metersblock"],
+        showIf: (a) => String(a.hymotyp ?? "").startsWith("B") && a.ersattningsmaterialStracka === "Ja",
+      },
       {
         key: "maskinStorlek",
         label: "Maskinstorlek",
@@ -166,7 +176,6 @@ const protocolGroups = [
         showIf: (a) => a.atgardsbehov === "Ja",
       },
       { key: "schaktmaskin", label: "Schaktmaskin", type: "binary", showIf: (a) => a.atgardsbehov === "Ja" },
-      { key: "atgardsbehov", label: "Åtgärdsbehov", type: "binary" },
       { key: "atgarder", label: "Åtgärder", type: "textarea", showIf: (a) => a.atgardsbehov === "Ja" },
       { key: "beskrivning", label: "Beskriv sträckan", type: "textarea" },
     ],
@@ -190,9 +199,9 @@ const part2Groups = new Set(["Vegetation, skuggning och död ved"]);
 const part3Groups = new Set(["Basnivå, svämplan och utveckling"]);
 
 const objectTypeOptionsByGeometry = {
-  point: ["Bestämmande sektion", "Knickpoint", "Kulturmiljö", "Damm", "Åtgärdspunkt", "Uppföljning"],
-  line: ["Ledarm", "Upprensning", "Sidogren", "Körväg", "Uppföljning"],
-  area: ["Översvämningsyta", "Åtgärdsyta", "Uppföljning"],
+  point: ["Bestämmande sektion", "Knickpoint", "Kulturmiljö", "Damm", "Åtgärdspunkt", "Ersättningsmaterial", "Lekbotten", "Uppföljning"],
+  line: ["Ledarm", "Upprensning", "Sidogren", "Körväg", "Ersättningsmaterial", "Lekbotten", "Uppföljning"],
+  area: ["Översvämningsyta", "Åtgärdsyta", "Ersättningsmaterial", "Lekbotten", "Uppföljning"],
 };
 
 const fallbackObjectTypes = [
@@ -217,6 +226,7 @@ const state = {
   draftFieldReach: [],
   mappingStarted: false,
   tool: "pan",
+  lastObjectTool: "point",
   tempObject: null,
   dragging: null,
   gpsEnabled: false,
@@ -826,7 +836,10 @@ function normalizeFieldPackage(fieldPackage) {
 function setTool(tool) {
   state.tool = tool;
   state.tempObject = null;
-  if (["point", "line", "area"].includes(tool)) updateObjectTypeSelect(tool);
+  if (["point", "line", "area"].includes(tool)) {
+    state.lastObjectTool = tool;
+    updateObjectTypeSelect(tool);
+  }
   document.querySelectorAll(".icon-button").forEach((button) => button.classList.remove("active"));
   document.querySelector(`#tool-${tool}`)?.classList.add("active");
   map.classList.toggle("drawing-active", !state.backgroundMap && tool !== "pan");
@@ -858,6 +871,21 @@ function setTool(tool) {
         ? "Klicka i kartan för att ta foto kopplat till aktiv sträcka."
       : "Klicka i kartan för att lägga till objekt på aktiv sträcka.";
   render();
+}
+
+function activateTab(tabName) {
+  const tab = document.querySelector(`.tab[data-tab="${tabName}"]`);
+  const panel = document.querySelector(`#${tabName}-panel`);
+  if (!tab || !panel) return;
+  document.querySelectorAll(".tab, .panel").forEach((item) => item.classList.remove("active"));
+  tab.classList.add("active");
+  panel.classList.add("active");
+}
+
+function toolTab(tool) {
+  if (["point", "line", "area"].includes(tool)) return "objects";
+  if (tool === "section") return "sections";
+  return null;
 }
 
 function createSection() {
@@ -2132,14 +2160,20 @@ showStartScreen();
 
 document.querySelectorAll(".tab").forEach((tab) => {
   tab.addEventListener("click", () => {
-    document.querySelectorAll(".tab, .panel").forEach((item) => item.classList.remove("active"));
-    tab.classList.add("active");
-    document.querySelector(`#${tab.dataset.tab}-panel`).classList.add("active");
+    activateTab(tab.dataset.tab);
+    if (tab.dataset.tab === "objects") setTool(state.lastObjectTool || "point");
+    if (tab.dataset.tab === "sections") setTool("section");
+    if (tab.dataset.tab === "protocol") setTool(state.activeSection ? "section" : "pan");
   });
 });
 
 document.querySelectorAll(".icon-button").forEach((button) => {
-  button.addEventListener("click", () => setTool(button.id.replace("tool-", "")));
+  button.addEventListener("click", () => {
+    const tool = button.id.replace("tool-", "");
+    const tabName = toolTab(tool);
+    if (tabName) activateTab(tabName);
+    setTool(tool);
+  });
 });
 
 toolMenuButton.addEventListener("click", () => {
@@ -2150,7 +2184,10 @@ mapZoomInButton.addEventListener("click", () => state.backgroundMap?.zoomIn());
 mapZoomOutButton.addEventListener("click", () => state.backgroundMap?.zoomOut());
 
 document.querySelectorAll("[data-object-tool]").forEach((button) => {
-  button.addEventListener("click", () => setTool(button.dataset.objectTool));
+  button.addEventListener("click", () => {
+    activateTab("objects");
+    setTool(button.dataset.objectTool);
+  });
 });
 
 drawFieldReachButton.addEventListener("click", () => {
@@ -2164,7 +2201,7 @@ clearFieldAreaButton.addEventListener("click", clearFieldAreaDraft);
 startMappingButton.addEventListener("click", startMapping);
 skipFieldAreaButton.addEventListener("click", skipFieldArea);
 fieldBufferSelect.addEventListener("change", () => {
-  fieldCustomBufferWrap.classList.toggle("hidden", fieldBufferSelect.value !== "custom");
+  fieldCustomBufferWrap?.classList.toggle("hidden", fieldBufferSelect.value !== "custom");
 });
 
 startStopButton.addEventListener("click", () => {
