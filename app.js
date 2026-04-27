@@ -806,6 +806,8 @@ function renderProjectList() {
 
 function showStartScreen() {
   renderProjectList();
+  splashCover?.removeAttribute("aria-hidden");
+  splashCover?.removeAttribute("tabindex");
   startScreen.classList.remove("show-projects");
   startScreen.classList.remove("hidden");
 }
@@ -815,7 +817,10 @@ function hideStartScreen() {
 }
 
 function showProjectPicker() {
+  splashCover?.setAttribute("aria-hidden", "true");
+  splashCover?.setAttribute("tabindex", "-1");
   startScreen.classList.add("show-projects");
+  console.info("[InField splash] Splashen är dold, startvyn visas.");
 }
 
 function switchProject() {
@@ -2882,7 +2887,18 @@ exportDownloadButton.addEventListener("click", () => {
   downloadBlob(state.lastExport.filename, state.lastExport.blob);
   exportStatusText.textContent = `Zipfilen laddades ner igen: ${state.lastExport.filename}`;
 });
-splashCover.addEventListener("click", showProjectPicker);
+splashCover.addEventListener("click", (event) => {
+  event.preventDefault();
+  showProjectPicker();
+});
+splashCover.querySelector("img")?.addEventListener(
+  "error",
+  () => {
+    console.warn("[InField splash] Splash_InField.png kunde inte laddas, startvyn visas ändå.");
+    showProjectPicker();
+  },
+  { once: true },
+);
 gpsToggleButton.addEventListener("click", toggleGps);
 centerGpsButton.addEventListener("click", centerOnGps);
 switchProjectButton.addEventListener("click", switchProject);
