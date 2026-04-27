@@ -36,14 +36,6 @@
         </div>
         <div class="app-settings">
           <h2>Inställningar</h2>
-          <label class="basemap-control" for="basemap-select">
-            <span>Bakgrund</span>
-            <select id="basemap-select">
-              <option value="osm">OSM</option>
-              <option value="lm-muted">LM nedtonad</option>
-              <option value="lm-topo">LM topo</option>
-            </select>
-          </label>
           <details class="token-settings">
             <summary>Lantmäteriet-behörighet</summary>
             <div class="token-grid">
@@ -135,6 +127,14 @@
               <span class="switch-label">GPS</span>
             </button>
             <button id="center-gps-button" class="quiet-button">Centrera</button>
+            <label class="basemap-control header-basemap-control" for="basemap-select">
+              <span>Baskarta</span>
+              <select id="basemap-select">
+                <option value="osm">OSM</option>
+                <option value="lm-muted">LM nedtonad</option>
+                <option value="lm-topo">LM topo</option>
+              </select>
+            </label>
             <button id="switch-project-button" class="quiet-button">Byt vattendrag</button>
             <button id="export-button" class="quiet-button">Export</button>
           </div>
@@ -165,31 +165,14 @@
         <section id="field-step-panel" class="field-step-panel">
           <div class="field-area-card">
             <span class="label">Steg 1</span>
-            <h2>Förbered fältområde</h2>
-            <strong id="field-status-label">Ej förberett</strong>
-            <p class="status-hint">Rita en planerad fältsträcka och välj hur långt ut från vattendraget området ska sparas.</p>
-            <div class="field-group">
-              <label for="field-package-name">Namn</label>
-              <input id="field-package-name" type="text" placeholder="Fältdag 1" />
-            </div>
-            <div class="field-group">
-              <label for="field-buffer-select">Buffert från vattendrag</label>
-              <select id="field-buffer-select">
-                <option value="5">5 m</option>
-                <option value="10">10 m</option>
-                <option value="20">20 m</option>
-                <option value="30">30 m</option>
-                <option value="50">50 m</option>
-                <option value="100" selected>100 m</option>
-              </select>
-            </div>
-            <p class="status-hint">Steg 2: tryck Rita planerad str?cka och g?r punkter l?ngs vattendraget du t?nker kartera.</p>
+            <h2>Välj stödlinje</h2>
+            <strong id="field-status-label">Ingen stödlinje vald</strong>
+            <p class="status-hint">Hämta vattendrag i kartvyn, välj en eller flera linjer och använd dem som stödlinje.</p>
             <div class="field-group">
               <label>Stödlinje</label>
               <div class="object-actions">
-                <button id="fetch-lantmateriet-waterways-button" class="secondary-button" type="button">Hämta LM i kartvyn</button>
-                <button id="import-reference-line-button" class="secondary-button" type="button">Importera linje</button>
-                <button id="fetch-osm-waterways-button" class="secondary-button" type="button">Hämta OSM i kartvyn</button>
+                <button id="fetch-lantmateriet-waterways-button" class="secondary-button" type="button">Hämta vattendrag i kartvy</button>
+                <button id="fetch-osm-waterways-button" class="secondary-button" type="button">Hämta OSM i kartvy</button>
                 <button id="use-reference-line-button" class="quiet-button" type="button" disabled>Använd vald linje</button>
               </div>
               <input id="reference-line-input" type="file" accept=".geojson,.json,.kml,application/geo+json,application/json,application/vnd.google-earth.kml+xml" hidden />
@@ -197,15 +180,14 @@
               <ul id="reference-line-list" class="item-list reference-line-list"></ul>
             </div>
             <div class="object-actions">
-              <button id="draw-field-reach-button" class="secondary-button" type="button">Rita planerad sträcka</button>
-              <button id="prepare-field-area-button" class="primary-button" type="button">Ladda område</button>
+              <button id="draw-field-reach-button" class="secondary-button" type="button">Rita egen linje</button>
+              <button id="import-reference-line-button" class="quiet-button" type="button">Importera linje</button>
               <button id="clear-field-area-button" class="quiet-button" type="button">Rensa</button>
             </div>
             <div class="field-start-actions">
               <button id="start-mapping-button" class="primary-button" type="button">Starta kartering</button>
             </div>
           </div>
-          <ul id="field-package-list" class="item-list"></ul>
         </section>
 
         <section id="mapping-workspace" class="mapping-workspace hidden">

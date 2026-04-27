@@ -446,6 +446,9 @@ function supportSlice(start, stop) {
 }
 
 function activeSupportLine() {
+  if (state.draftFieldReach.length > 1) return state.draftFieldReach;
+  const selected = selectedReferenceLines();
+  if (selected.length) return combinedReferenceLinePoints(selected);
   return state.fieldPackages.at(-1)?.plannedReach?.length > 1 ? state.fieldPackages.at(-1).plannedReach : null;
 }
 
@@ -664,7 +667,6 @@ function authenticatedTileLayer(urlTemplate, options, auth) {
       tile.alt = "";
       const url = window.L.Util.template(urlTemplate, {
         ...coords,
-        s: this._getSubdomain(coords),
       });
       fetch(url, {
         headers: { Authorization: authorizationHeader(auth) },
@@ -848,7 +850,7 @@ function openWatercourse(name, saveCurrent = true) {
     state.photos = payload.photos ?? [];
     state.fieldPackages = (payload.fieldPackages ?? []).map(normalizeFieldPackage);
     state.referenceLines = (payload.referenceLines ?? []).map(normalizeReferenceLine);
-    setSelectedReferenceLineIds(payload.selectedReferenceLineIds ?? (payload.selectedReferenceLineId ? [payload.selectedReferenceLineId] : [state.referenceLines[0]?.id].filter(Boolean)));
+    setSelectedReferenceLineIds(payload.selectedReferenceLineIds ?? (payload.selectedReferenceLineId ? [payload.selectedReferenceLineId] : []));
     state.draftFieldReach = [];
     state.mappingStarted = Boolean(payload.mappingStarted || (payload.sections?.length ?? 0) > 0 || payload.activeSection);
     state.projectMeta = { ...defaultProjectMeta(), ...(payload.projectMeta ?? {}) };
@@ -1492,42 +1494,6 @@ function renderFieldPackages() {
       });
     }
   });
-  state.fieldPackages.forEach((fieldPackage) => {
-    if (state.leafletLayers?.field && window.L) {
-      if (fieldPackage.fieldArea?.length) {
-        window.L.polygon(toLatLngs(fieldPackage.fieldArea), {
-          color: "#2563eb",
-          weight: 2,
-          dashArray: "10 8",
-          fillColor: "#3b82f6",
-          fillOpacity: 0.16,
-        }).addTo(state.leafletLayers.field);
-      }
-      if (fieldPackage.plannedReach?.length > 1) {
-        window.L.polyline(toLatLngs(fieldPackage.plannedReach), {
-          color: "#2563eb",
-          weight: 5,
-        }).addTo(state.leafletLayers.field);
-      }
-      return;
-    }
-    if (fieldPackage.fieldArea?.length) {
-      fieldLayer.append(
-        makeSvg("path", {
-          d: `${pathFromPoints(fieldPackage.fieldArea)} Z`,
-          class: "field-area",
-        }),
-      );
-    }
-    if (fieldPackage.plannedReach?.length > 1) {
-      fieldLayer.append(
-        makeSvg("path", {
-          d: pathFromPoints(fieldPackage.plannedReach),
-          class: "field-reach",
-        }),
-      );
-    }
-  });
   if (state.draftFieldReach.length) {
     if (state.leafletLayers?.field && window.L) {
       if (state.draftFieldReach.length > 1) {
@@ -1737,10 +1703,11 @@ function renderLists() {
   const selectedLines = selectedReferenceLines();
   useReferenceLineButton.disabled = !selectedLines.length;
   useReferenceLineButton.textContent = selectedLines.length > 1 ? "Använd valda linjer" : "Använd vald linje";
+  startMappingButton.disabled = state.draftFieldReach.length < 2 && !selectedLines.length;
   referenceLineStatus.textContent = state.referenceLines.length
     ? selectedLines.length
       ? `${selectedLines.length} stödlinje${selectedLines.length === 1 ? "" : "r"} vald${selectedLines.length === 1 ? "" : "a"}`
-      : "Välj en stödlinje på kartan eller i listan."
+      : `${state.referenceLines.length} linje${state.referenceLines.length === 1 ? "" : "r"} hittad${state.referenceLines.length === 1 ? "" : "e"}. Välj en eller flera i listan.`
     : "Ingen stödlinje importerad.";
   state.referenceLines
     .slice()
@@ -1757,27 +1724,15 @@ function renderLists() {
     referenceLineList.append(li);
   });
 
-  fieldPackageList.innerHTML = "";
-  const fieldReady = state.fieldPackages.length > 0;
   fieldStepPanel.classList.toggle("hidden", state.mappingStarted);
   mappingWorkspace.classList.toggle("hidden", !state.mappingStarted);
-  prepareFieldAreaButton.disabled = state.draftFieldReach.length < 2;
   fieldStatusLabel.textContent = state.draftFieldReach.length
     ? state.draftFieldReach.length > 1
-      ? "Tryck Förbered område"
+      ? "Stödlinje redo"
       : "Ritar planerad sträcka"
-    : state.fieldPackages.length
-      ? "Sparat lokalt"
-      : "Ej förberett";
-  state.fieldPackages
-    .slice()
-    .reverse()
-    .forEach((fieldPackage) => {
-      const li = document.createElement("li");
-      const pointCount = fieldPackage.plannedReach?.length ?? 0;
-      li.innerHTML = `<strong>${fieldPackage.name}</strong><span>${fieldPackage.bufferMeters} m buffert · ${pointCount} punkter · ${fieldPackage.statusLabel ?? "Sparat lokalt"}</span>`;
-      fieldPackageList.append(li);
-    });
+    : selectedLines.length
+      ? "Linje vald"
+    : "Ingen stödlinje vald";
 }
 
 function renderSectionPhotos() {
@@ -2030,8 +1985,11 @@ function featureName(feature, fallback) {
   const firstName = Array.isArray(geographicalName)
     ? geographicalName.find((item) => item?.text)?.text
     : null;
+  const flatName = feature?.properties?.["geographicalName.text"];
+  const firstFlatName = Array.isArray(flatName) ? flatName.find(Boolean) : flatName;
   return (
     firstName ||
+    firstFlatName ||
     feature?.properties?.namn ||
     feature?.properties?.name ||
     feature?.properties?.NAMN ||
@@ -2059,8 +2017,8 @@ function addReferenceLines(lines, source = "", options = {}) {
     return;
   }
   state.referenceLines.push(...cleanLines);
-  setSelectedReferenceLineIds([cleanLines[0].id]);
-  referenceLineStatus.textContent = `${cleanLines.length} stödlinje${cleanLines.length === 1 ? "" : "r"} importerad${cleanLines.length === 1 ? "" : "e"}.`;
+  setSelectedReferenceLineIds(options.autoSelect ? [cleanLines[0].id] : []);
+  referenceLineStatus.textContent = `${cleanLines.length} stödlinje${cleanLines.length === 1 ? "" : "r"} hämtad${cleanLines.length === 1 ? "" : "e"}. Välj en eller flera i listan.`;
   if (options.fit !== false) fitMapToPoints(cleanLines[0].points);
   saveProject();
   render();
@@ -2266,7 +2224,7 @@ async function fetchOsmWaterwaysInView() {
         name: osmWaterwayName(element.tags, index),
         points: element.geometry.map((point) => [Number(point.lon.toFixed(7)), Number(point.lat.toFixed(7))]),
       }));
-    addReferenceLines(lines, "OpenStreetMap Overpass");
+    addReferenceLines(lines, "OpenStreetMap Overpass", { fit: false });
   } catch (error) {
     referenceLineStatus.textContent = "Kunde inte hämta linjer just nu. Testa mindre kartvy eller importera fil.";
   }
@@ -2276,10 +2234,10 @@ function useSelectedReferenceLine() {
   const lines = selectedReferenceLines();
   if (!lines.length) return;
   state.draftFieldReach = combinedReferenceLinePoints(lines);
-  fieldStatusLabel.textContent = "Tryck Förbered område";
+  fieldStatusLabel.textContent = "Stödlinje redo";
   mapHint.textContent = lines.length === 1
-    ? "Vald stödlinje används som planerad fältsträcka."
-    : `${lines.length} stödlinjer används som en planerad fältsträcka.`;
+    ? "Vald stödlinje används som stödlinje. Tryck Starta kartering när du är redo."
+    : `${lines.length} stödlinjer används som en lång stödlinje. Tryck Starta kartering när du är redo.`;
   sideMapHint.textContent = mapHint.textContent;
   fitMapToPoints(state.draftFieldReach);
   saveProject();
@@ -2343,7 +2301,11 @@ function prepareFieldArea() {
 }
 
 function startMapping() {
-  if (!state.fieldPackages.length && !window.confirm("Inget fältområde är sparat ännu. Vill du fortsätta utan fältområde?")) {
+  if (state.draftFieldReach.length < 2 && selectedReferenceLines().length) {
+    state.draftFieldReach = combinedReferenceLinePoints(selectedReferenceLines());
+  }
+  if (state.draftFieldReach.length < 2) {
+    fieldStatusLabel.textContent = "Välj eller rita en stödlinje först";
     return;
   }
   state.mappingStarted = true;
@@ -2361,7 +2323,8 @@ function skipFieldArea() {
 
 function clearFieldAreaDraft() {
   state.draftFieldReach = [];
-  fieldStatusLabel.textContent = state.fieldPackages.length ? "Sparat lokalt" : "Ej förberett";
+  setSelectedReferenceLineIds([]);
+  fieldStatusLabel.textContent = "Ingen stödlinje vald";
   saveProject();
   render();
 }
@@ -2663,10 +2626,10 @@ function handlePointInMap(point) {
       state.draftFieldReach.push(point);
     }
     fieldStatusLabel.textContent =
-      state.draftFieldReach.length > 1 ? "Tryck Förbered område" : "Ritar planerad sträcka";
+      state.draftFieldReach.length > 1 ? "Stödlinje redo" : "Ritar egen linje";
     mapHint.textContent =
       state.draftFieldReach.length > 1
-        ? `${state.draftFieldReach.length} punkter i planerad sträcka. Klicka längs bäcken eller tryck Förbered område.`
+        ? `${state.draftFieldReach.length} punkter i stödlinjen. Klicka vidare eller tryck Starta kartering.`
         : reference
           ? "Klicka stoppunkt på stödlinjen."
           : "Lägg nästa punkt längs vattnet.";
@@ -2761,14 +2724,12 @@ document.querySelectorAll("[data-object-tool]").forEach((button) => {
 drawFieldReachButton.addEventListener("click", () => {
   state.draftFieldReach = [];
   fieldStatusLabel.textContent = "Ritar planerad sträcka";
-  prepareFieldAreaButton.disabled = true;
   mapHint.textContent = selectedReferenceLine()
     ? "Klicka start och stopp på stödlinjen."
     : "Gör punkter längs vattendraget du tänker kartera.";
   sideMapHint.textContent = mapHint.textContent;
   setTool("field");
 });
-prepareFieldAreaButton.addEventListener("click", prepareFieldArea);
 clearFieldAreaButton.addEventListener("click", clearFieldAreaDraft);
 startMappingButton.addEventListener("click", startMapping);
 importReferenceLineButton.addEventListener("click", () => referenceLineInput.click());
@@ -2802,7 +2763,7 @@ referenceLineList.addEventListener("click", (event) => {
     render();
   }
 });
-fieldBufferSelect.addEventListener("change", () => {
+fieldBufferSelect?.addEventListener("change", () => {
   fieldCustomBufferWrap?.classList.toggle("hidden", fieldBufferSelect.value !== "custom");
 });
 

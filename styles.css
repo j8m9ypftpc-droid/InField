@@ -373,6 +373,11 @@ input {
   padding: 8px 10px;
 }
 
+.header-basemap-control {
+  min-width: 122px;
+  padding: 6px 9px;
+}
+
 .basemap-control span {
   color: var(--muted);
   font-size: 12px;
@@ -385,6 +390,7 @@ input {
   color: var(--ink);
   font-weight: 800;
   outline: none;
+  max-width: 150px;
 }
 
 .theme-toggle-button {
