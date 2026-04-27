@@ -353,7 +353,6 @@ const clearLantmaterietTokenButton = document.querySelector("#clear-lantmateriet
 const referenceLineInput = document.querySelector("#reference-line-input");
 const referenceLineStatus = document.querySelector("#reference-line-status");
 const referenceLineList = document.querySelector("#reference-line-list");
-const useReferenceLineButton = document.querySelector("#use-reference-line-button");
 const exportDialog = document.querySelector("#export-dialog");
 const exportStatusText = document.querySelector("#export-status-text");
 const exportShareButton = document.querySelector("#export-share-button");
@@ -1061,8 +1060,25 @@ function isReferenceLineSelected(line) {
 function toggleReferenceLineSelection(id) {
   const ids = selectedReferenceLineIds();
   setSelectedReferenceLineIds(ids.includes(id) ? ids.filter((item) => item !== id) : [...ids, id]);
-  state.draftFieldReach = [];
   clearTemporaryDrawingState();
+  activateSelectedReferenceLines({ fit: true });
+}
+
+function activateSelectedReferenceLines(options = {}) {
+  const lines = selectedReferenceLines();
+  state.draftFieldReach = lines.length ? combinedReferenceLinePoints(lines) : [];
+  if (!lines.length) {
+    fieldStatusLabel.textContent = "Ingen stödlinje vald";
+    mapHint.textContent = "Välj en stödlinje i listan eller rita egen linje.";
+    sideMapHint.textContent = mapHint.textContent;
+    return;
+  }
+  fieldStatusLabel.textContent = "Stödlinje redo";
+  mapHint.textContent = lines.length === 1
+    ? "Vald stödlinje är aktiv. Starta kartering eller välj start/stopp längs linjen."
+    : `${lines.length} stödlinjer är aktiva och används som en sammanhängande stödlinje.`;
+  sideMapHint.textContent = mapHint.textContent;
+  if (options.fit && state.draftFieldReach.length > 1) fitMapToPoints(state.draftFieldReach);
 }
 
 function referenceLineSortKey(line) {
@@ -1568,7 +1584,7 @@ function renderFieldPackages() {
       layer.on("click", () => {
         toggleReferenceLineSelection(line.id);
         const lineName = safeReferenceLineName(line);
-        referenceLineStatus.textContent = isReferenceLineSelected(line) ? `Vald stödlinje: ${lineName}` : `Avmarkerad stödlinje: ${lineName}`;
+        referenceLineStatus.textContent = isReferenceLineSelected(line) ? `Aktiv stödlinje: ${lineName}` : `Avmarkerad stödlinje: ${lineName}`;
         saveProject();
         render();
       });
@@ -1781,12 +1797,10 @@ function renderLists() {
 
   referenceLineList.innerHTML = "";
   const selectedLines = selectedReferenceLines();
-  useReferenceLineButton.disabled = !selectedLines.length;
-  useReferenceLineButton.textContent = selectedLines.length > 1 ? "Använd valda linjer" : "Använd vald linje";
   startMappingButton.disabled = state.draftFieldReach.length < 2 && !selectedLines.length;
   referenceLineStatus.textContent = state.referenceLines.length
     ? selectedLines.length
-      ? `${selectedLines.length} stödlinje${selectedLines.length === 1 ? "" : "r"} vald${selectedLines.length === 1 ? "" : "a"}`
+      ? `${selectedLines.length} stödlinje${selectedLines.length === 1 ? "" : "r"} aktiv${selectedLines.length === 1 ? "" : "a"}`
       : `${state.referenceLines.length} linje${state.referenceLines.length === 1 ? "" : "r"} hittad${state.referenceLines.length === 1 ? "" : "e"}. Välj en eller flera i listan.`
     : "Ingen stödlinje importerad.";
   state.referenceLines
@@ -1801,7 +1815,7 @@ function renderLists() {
     const selected = isReferenceLineSelected(line);
     const lineName = safeReferenceLineName(line);
     li.className = selected ? "selected compact" : "compact";
-    li.innerHTML = `<strong>${lineName}</strong><span>${formatLength(line.points)} · ${line.points.length} punkter</span><div class="list-actions"><button class="quiet-button" data-select-reference-line="${line.id}">${selected ? "Vald" : "Välj"}</button><button class="danger-button" data-delete-reference-line="${line.id}">Ta bort</button></div>`;
+    li.innerHTML = `<strong>${lineName}</strong><span>${selected ? "Aktiv stödlinje" : "Tryck Välj för att aktivera"} · ${formatLength(line.points)} · ${line.points.length} punkter</span><div class="list-actions"><button class="${selected ? "secondary-button" : "quiet-button"}" data-select-reference-line="${line.id}">${selected ? "Aktiv" : "Välj"}</button><button class="danger-button" data-delete-reference-line="${line.id}">Ta bort</button></div>`;
     referenceLineList.append(li);
   });
 
@@ -2095,8 +2109,11 @@ function addReferenceLines(lines, source = "", options = {}) {
   state.referenceLines.push(...cleanLines);
   state.draftFieldReach = [];
   clearTemporaryDrawingState();
-  setSelectedReferenceLineIds(options.autoSelect ? [cleanLines[0].id] : []);
-  referenceLineStatus.textContent = `${cleanLines.length} stödlinje${cleanLines.length === 1 ? "" : "r"} hämtad${cleanLines.length === 1 ? "" : "e"}. Välj en eller flera i listan.`;
+  setSelectedReferenceLineIds(options.autoSelect || cleanLines.length === 1 ? [cleanLines[0].id] : []);
+  if (selectedReferenceLines().length) activateSelectedReferenceLines({ fit: false });
+  referenceLineStatus.textContent = selectedReferenceLines().length
+    ? `${cleanLines.length} stödlinje hämtad och aktiverad.`
+    : `${cleanLines.length} stödlinje${cleanLines.length === 1 ? "" : "r"} hämtad${cleanLines.length === 1 ? "" : "e"}. Välj en eller flera i listan.`;
   if (options.fit !== false) fitMapToPoints(cleanLines[0].points);
   setTool("pan");
   saveProject();
@@ -2307,21 +2324,6 @@ async function fetchOsmWaterwaysInView() {
   } catch (error) {
     referenceLineStatus.textContent = "Kunde inte hämta linjer just nu. Testa mindre kartvy eller importera fil.";
   }
-}
-
-function useSelectedReferenceLine() {
-  const lines = selectedReferenceLines();
-  if (!lines.length) return;
-  state.draftFieldReach = combinedReferenceLinePoints(lines);
-  clearTemporaryDrawingState();
-  fieldStatusLabel.textContent = "Stödlinje redo";
-  mapHint.textContent = lines.length === 1
-    ? "Vald stödlinje används som stödlinje. Tryck Starta kartering när du är redo."
-    : `${lines.length} stödlinjer används som en lång stödlinje. Tryck Starta kartering när du är redo.`;
-  sideMapHint.textContent = mapHint.textContent;
-  fitMapToPoints(state.draftFieldReach);
-  saveProject();
-  render();
 }
 
 function combinedReferenceLinePoints(lines) {
@@ -2838,7 +2840,6 @@ referenceLineInput.addEventListener("change", () => {
   if (file) importReferenceLineFile(file);
   referenceLineInput.value = "";
 });
-useReferenceLineButton.addEventListener("click", useSelectedReferenceLine);
 referenceLineList.addEventListener("click", (event) => {
   const selectId = event.target.dataset.selectReferenceLine;
   const deleteId = event.target.dataset.deleteReferenceLine;
@@ -2847,7 +2848,7 @@ referenceLineList.addEventListener("click", (event) => {
     const line = state.referenceLines.find((item) => item.id === selectId);
     if (line) {
       const lineName = safeReferenceLineName(line);
-      referenceLineStatus.textContent = isReferenceLineSelected(line) ? `Vald stödlinje: ${lineName}` : `Avmarkerad stödlinje: ${lineName}`;
+      referenceLineStatus.textContent = isReferenceLineSelected(line) ? `Aktiv stödlinje: ${lineName}` : `Avmarkerad stödlinje: ${lineName}`;
     }
     saveProject();
     render();
