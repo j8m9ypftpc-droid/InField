@@ -16,6 +16,11 @@
   [844, 108],
 ];
 
+const LANTMATERIET_TOKEN_KEY = "infield:lantmateriet-token";
+const LANTMATERIET_WATERCOURSE_URL =
+  "https://api.lantmateriet.se/ogc-features/v1/hydrografi/collections/WatercourseLine/items";
+const LANTMATERIET_ATTRIBUTION = "Hydrografi Direkt © Lantmäteriet, bearbetad, CC BY 4.0";
+
 const protocolOptions = {
   hymotyp: ["Bt", "Bx", "Cx", "Ex", "Tt"],
   vattenforing: ["L", "M"],
@@ -306,8 +311,13 @@ const fieldStepPanel = document.querySelector("#field-step-panel");
 const mappingWorkspace = document.querySelector("#mapping-workspace");
 const startMappingButton = document.querySelector("#start-mapping-button");
 const skipFieldAreaButton = document.querySelector("#skip-field-area-button");
+const fetchLantmaterietWaterwaysButton = document.querySelector("#fetch-lantmateriet-waterways-button");
 const importReferenceLineButton = document.querySelector("#import-reference-line-button");
 const fetchOsmWaterwaysButton = document.querySelector("#fetch-osm-waterways-button");
+const lantmaterietTokenInput = document.querySelector("#lantmateriet-token-input");
+const saveLantmaterietTokenButton = document.querySelector("#save-lantmateriet-token-button");
+const testLantmaterietTokenButton = document.querySelector("#test-lantmateriet-token-button");
+const clearLantmaterietTokenButton = document.querySelector("#clear-lantmateriet-token-button");
 const referenceLineInput = document.querySelector("#reference-line-input");
 const referenceLineStatus = document.querySelector("#reference-line-status");
 const referenceLineList = document.querySelector("#reference-line-list");
@@ -860,6 +870,8 @@ function normalizeReferenceLine(line) {
     id: line.id ?? crypto.randomUUID(),
     name: line.name ?? "Importerad stödlinje",
     source: line.source ?? "",
+    license: line.license ?? "",
+    properties: line.properties ?? {},
     points: normalizePoints(line.points ?? []),
   };
 }
@@ -1883,18 +1895,33 @@ function fieldBufferMeters() {
 }
 
 function featureName(feature, fallback) {
+  const geographicalName = feature?.properties?.geographicalName;
+  const firstName = Array.isArray(geographicalName)
+    ? geographicalName.find((item) => item?.text)?.text
+    : null;
   return (
+    firstName ||
     feature?.properties?.namn ||
     feature?.properties?.name ||
     feature?.properties?.NAMN ||
     feature?.properties?.Name ||
+    feature?.properties?.Id ||
+    feature?.properties?.id ||
+    feature?.id ||
     fallback
   );
 }
 
-function addReferenceLines(lines, source = "") {
+function addReferenceLines(lines, source = "", options = {}) {
   const cleanLines = lines
-    .map((line, index) => normalizeReferenceLine({ ...line, source, name: line.name || `Stödlinje ${state.referenceLines.length + index + 1}` }))
+    .map((line, index) =>
+      normalizeReferenceLine({
+        ...line,
+        source,
+        license: line.license ?? options.license ?? "",
+        name: line.name || `Stödlinje ${state.referenceLines.length + index + 1}`,
+      })
+    )
     .filter((line) => line.points.length > 1);
   if (!cleanLines.length) {
     referenceLineStatus.textContent = "Hittade ingen linje i filen.";
@@ -1915,11 +1942,19 @@ function collectGeoJsonLines(data) {
     const geometry = feature.geometry ?? feature;
     if (!geometry) return;
     if (geometry.type === "LineString") {
-      lines.push({ name: featureName(feature, `Stödlinje ${featureIndex + 1}`), points: normalizePoints(geometry.coordinates) });
+      lines.push({
+        name: featureName(feature, `Stödlinje ${featureIndex + 1}`),
+        properties: feature.properties ?? {},
+        points: normalizePoints(geometry.coordinates),
+      });
     }
     if (geometry.type === "MultiLineString") {
       geometry.coordinates.forEach((points, lineIndex) => {
-        lines.push({ name: `${featureName(feature, `Stödlinje ${featureIndex + 1}`)} ${lineIndex + 1}`, points: normalizePoints(points) });
+        lines.push({
+          name: `${featureName(feature, `Stödlinje ${featureIndex + 1}`)} ${lineIndex + 1}`,
+          properties: feature.properties ?? {},
+          points: normalizePoints(points),
+        });
       });
     }
   });
@@ -1956,6 +1991,91 @@ async function importReferenceLineFile(file) {
     addReferenceLines(lines, file.name);
   } catch (error) {
     referenceLineStatus.textContent = "Kunde inte läsa stödlinjen. Testa GeoJSON eller KML.";
+  }
+}
+
+function savedLantmaterietToken() {
+  return localStorage.getItem(LANTMATERIET_TOKEN_KEY)?.trim() ?? "";
+}
+
+function syncLantmaterietTokenInput() {
+  if (!lantmaterietTokenInput) return;
+  lantmaterietTokenInput.value = savedLantmaterietToken();
+}
+
+function saveLantmaterietToken() {
+  const token = lantmaterietTokenInput?.value.trim() ?? "";
+  if (!token) {
+    referenceLineStatus.textContent = "Klistra in token först.";
+    return;
+  }
+  localStorage.setItem(LANTMATERIET_TOKEN_KEY, token);
+  referenceLineStatus.textContent = "Lantmäteriet-token sparad lokalt.";
+}
+
+function clearLantmaterietToken() {
+  localStorage.removeItem(LANTMATERIET_TOKEN_KEY);
+  if (lantmaterietTokenInput) lantmaterietTokenInput.value = "";
+  referenceLineStatus.textContent = "Lantmäteriet-token rensad från webbläsaren.";
+}
+
+function mapBoundsParams(limit = 1000) {
+  const bounds = state.backgroundMap.getBounds();
+  const south = Number(bounds.getSouth().toFixed(7));
+  const west = Number(bounds.getWest().toFixed(7));
+  const north = Number(bounds.getNorth().toFixed(7));
+  const east = Number(bounds.getEast().toFixed(7));
+  const params = new URLSearchParams({
+    bbox: `${west},${south},${east},${north}`,
+    limit: String(limit),
+    f: "json",
+  });
+  return { params, span: Math.max(Math.abs(north - south), Math.abs(east - west)) };
+}
+
+async function fetchLantmaterietJson(params, token) {
+  const url = `${LANTMATERIET_WATERCOURSE_URL}?${params.toString()}`;
+  try {
+    const response = await fetch(url, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (response.ok) return response.json();
+  } catch (error) {
+    // Some browsers preflight Authorization requests. The API also supports access_token as a query parameter.
+  }
+  const tokenParams = new URLSearchParams(params);
+  tokenParams.set("access_token", token);
+  const fallbackResponse = await fetch(`${LANTMATERIET_WATERCOURSE_URL}?${tokenParams.toString()}`);
+  if (!fallbackResponse.ok) throw new Error("Lantmäteriet svarade inte.");
+  return fallbackResponse.json();
+}
+
+async function fetchLantmaterietWaterwaysInView(testOnly = false) {
+  if (!state.backgroundMap) return;
+  const token = (lantmaterietTokenInput?.value.trim() || savedLantmaterietToken()).trim();
+  if (!token) {
+    referenceLineStatus.textContent = "Klistra in och spara Lantmäteriet-token först.";
+    return;
+  }
+  if (lantmaterietTokenInput?.value.trim()) localStorage.setItem(LANTMATERIET_TOKEN_KEY, token);
+
+  const { params, span } = mapBoundsParams(testOnly ? 1 : 1000);
+  if (!testOnly && span > 0.25 && !window.confirm("Kartvyn är ganska stor. Zooma helst in på din arbetsplats. Vill du hämta ändå?")) return;
+
+  referenceLineStatus.textContent = testOnly ? "Testar åtkomst till Lantmäteriet..." : "Hämtar Lantmäteriet-linjer i kartvyn...";
+  try {
+    const data = await fetchLantmaterietJson(params, token);
+    if (testOnly) {
+      referenceLineStatus.textContent = "Åtkomst till Lantmäteriet fungerar.";
+      return;
+    }
+    const lines = collectGeoJsonLines(data).map((line) => ({ ...line, license: LANTMATERIET_ATTRIBUTION }));
+    addReferenceLines(lines, "Lantmäteriet Hydrografi Direkt", { license: LANTMATERIET_ATTRIBUTION });
+    if ((data.numberMatched ?? 0) > lines.length) {
+      referenceLineStatus.textContent = `${lines.length} Lantmäteriet-linjer hämtade. Zooma in mer om du vill minska urvalet.`;
+    }
+  } catch (error) {
+    referenceLineStatus.textContent = "Kunde inte hämta från Lantmäteriet. Kontrollera token och zooma in till en mindre kartvy.";
   }
 }
 
@@ -2186,6 +2306,8 @@ async function exportGeoJson(projectPayload = null) {
       vattendrag: exportState.watercourse,
       namn: line.name,
       kalla: line.source ?? "",
+      licens: line.license ?? "",
+      bearbetad: Boolean(line.license),
     },
     geometry: geometryToGeo({ type: "LineString", coordinates: line.points ?? [] }),
   }));
@@ -2224,6 +2346,7 @@ async function exportGeoJson(projectPayload = null) {
     ytobjekt: layers[3][1].length,
     faltomraden: exportState.fieldPackages?.length ?? 0,
     stodlinjer: exportState.referenceLines?.length ?? 0,
+    datakallor: [...new Set((exportState.referenceLines ?? []).map((line) => line.source).filter(Boolean))],
     foton: photoMetadata.length,
   };
   if (window.JSZip) {
@@ -2426,6 +2549,7 @@ supportLine.classList.toggle("hidden", !state.useSupportLine);
 initBackgroundMap();
 renderProtocolFields();
 updateObjectTypeSelect("point", "Bestämmande sektion");
+syncLantmaterietTokenInput();
 renderProjectList();
 showStartScreen();
 
@@ -2477,6 +2601,10 @@ startMappingButton.addEventListener("click", startMapping);
 skipFieldAreaButton.addEventListener("click", skipFieldArea);
 importReferenceLineButton.addEventListener("click", () => referenceLineInput.click());
 fetchOsmWaterwaysButton.addEventListener("click", fetchOsmWaterwaysInView);
+fetchLantmaterietWaterwaysButton?.addEventListener("click", () => fetchLantmaterietWaterwaysInView(false));
+saveLantmaterietTokenButton?.addEventListener("click", saveLantmaterietToken);
+testLantmaterietTokenButton?.addEventListener("click", () => fetchLantmaterietWaterwaysInView(true));
+clearLantmaterietTokenButton?.addEventListener("click", clearLantmaterietToken);
 referenceLineInput.addEventListener("change", () => {
   const file = referenceLineInput.files?.[0];
   if (file) importReferenceLineFile(file);

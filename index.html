@@ -165,10 +165,21 @@
             <div class="field-group">
               <label>Stödlinje</label>
               <div class="object-actions">
+                <button id="fetch-lantmateriet-waterways-button" class="secondary-button" type="button">Hämta Lantmäteriet</button>
                 <button id="import-reference-line-button" class="secondary-button" type="button">Importera linje</button>
                 <button id="fetch-osm-waterways-button" class="secondary-button" type="button">Hämta i kartvyn</button>
                 <button id="use-reference-line-button" class="quiet-button" type="button" disabled>Använd vald linje</button>
               </div>
+              <details class="token-settings">
+                <summary>Lantmäteriet-token</summary>
+                <div class="token-grid">
+                  <input id="lantmateriet-token-input" type="password" autocomplete="off" placeholder="Klistra in token här" />
+                  <button id="save-lantmateriet-token-button" class="secondary-button" type="button">Spara</button>
+                  <button id="test-lantmateriet-token-button" class="quiet-button" type="button">Testa</button>
+                  <button id="clear-lantmateriet-token-button" class="quiet-button" type="button">Rensa</button>
+                </div>
+                <p class="status-hint">Token sparas bara lokalt i webbläsaren. Lägg den inte i GitHub eller exportfiler.</p>
+              </details>
               <input id="reference-line-input" type="file" accept=".geojson,.json,.kml,application/geo+json,application/json,application/vnd.google-earth.kml+xml" hidden />
               <p id="reference-line-status" class="status-hint">Ingen stödlinje importerad.</p>
               <ul id="reference-line-list" class="item-list reference-line-list"></ul>

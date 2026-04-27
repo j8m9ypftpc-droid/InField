@@ -759,6 +759,24 @@ select,
   resize: vertical;
 }
 
+.token-settings {
+  margin: 10px 0;
+}
+
+.token-settings summary {
+  cursor: pointer;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.token-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  gap: 8px;
+  margin-top: 8px;
+  align-items: center;
+}
+
 .field-area-card {
   padding: 14px;
   border: 1px solid var(--line);
@@ -923,6 +941,10 @@ select,
   .list-actions,
   .object-edit-actions {
     flex-direction: column;
+  }
+
+  .token-grid {
+    grid-template-columns: 1fr;
   }
 
   .choice-grid.compact {
