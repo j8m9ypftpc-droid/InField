@@ -382,6 +382,47 @@ function supportSlice(start, stop) {
   return reversed ? points.reverse() : points;
 }
 
+function activeSupportLine() {
+  return state.fieldPackages.at(-1)?.plannedReach?.length > 1 ? state.fieldPackages.at(-1).plannedReach : null;
+}
+
+function snapToLine(point, points) {
+  let best = { point: points[0], segment: 0, t: 0, dist: Infinity };
+  for (let i = 0; i < points.length - 1; i += 1) {
+    const candidate = closestOnGeoSegment(point, points[i], points[i + 1]);
+    const candidateDist = mapDistance(point, candidate.point);
+    if (candidateDist < best.dist) best = { ...candidate, segment: i, dist: candidateDist };
+  }
+  return best;
+}
+
+function closestOnGeoSegment(point, a, b) {
+  const origin = a;
+  const p = lonLatToMeters(point, origin);
+  const start = lonLatToMeters(a, origin);
+  const stop = lonLatToMeters(b, origin);
+  const dx = stop[0] - start[0];
+  const dy = stop[1] - start[1];
+  const len = dx * dx + dy * dy || 1;
+  const t = Math.max(0, Math.min(1, ((p[0] - start[0]) * dx + (p[1] - start[1]) * dy) / len));
+  const snappedMeters = [start[0] + t * dx, start[1] + t * dy];
+  return { point: metersToLonLat(snappedMeters, origin), t };
+}
+
+function lineSlice(points, start, stop) {
+  const first = start.segment + start.t;
+  const last = stop.segment + stop.t;
+  const reversed = first > last;
+  const from = reversed ? stop : start;
+  const to = reversed ? start : stop;
+  const sliced = [from.point];
+  for (let i = from.segment + 1; i <= to.segment; i += 1) {
+    sliced.push(points[i]);
+  }
+  sliced.push(to.point);
+  return reversed ? sliced.reverse() : sliced;
+}
+
 function svgPoint(event) {
   const pt = map.createSVGPoint();
   pt.x = event.clientX;
@@ -2018,10 +2059,17 @@ function handlePointInMap(point) {
   if (state.tool === "pan") return;
   if (state.tool === "section") {
     if (!state.activeSection) return;
+    const support = activeSupportLine();
     if (!state.activeSection.startConfirmed) {
-      state.activeSection.points = [point];
+      state.activeSection.points = [support ? snapToLine(point, support).point : point];
     } else {
-      state.activeSection.points = [state.activeSection.points[0], point];
+      if (support) {
+        const startSnap = snapToLine(state.activeSection.points[0], support);
+        const stopSnap = snapToLine(point, support);
+        state.activeSection.points = lineSlice(support, startSnap, stopSnap);
+      } else {
+        state.activeSection.points = [state.activeSection.points[0], point];
+      }
     }
   } else if (state.tool === "point") {
     addObjectPoint(point);
@@ -2065,8 +2113,9 @@ function startDrag(event) {
 function moveDrag(event) {
   if (state.dragging === null || !state.activeSection) return;
   const point = svgPoint(event);
-  state.activeSection.points[state.dragging] =
-    state.useSupportLine && !event.shiftKey ? snapToSupport(point).point : point;
+  const support = activeSupportLine();
+  const geoPoint = mapPointToGeo(point);
+  state.activeSection.points[state.dragging] = support ? snapToLine(geoPoint, support).point : geoPoint;
   render();
 }
 
