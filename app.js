@@ -307,6 +307,7 @@ const mappingWorkspace = document.querySelector("#mapping-workspace");
 const startMappingButton = document.querySelector("#start-mapping-button");
 const skipFieldAreaButton = document.querySelector("#skip-field-area-button");
 const importReferenceLineButton = document.querySelector("#import-reference-line-button");
+const fetchOsmWaterwaysButton = document.querySelector("#fetch-osm-waterways-button");
 const referenceLineInput = document.querySelector("#reference-line-input");
 const referenceLineStatus = document.querySelector("#reference-line-status");
 const referenceLineList = document.querySelector("#reference-line-list");
@@ -1958,6 +1959,55 @@ async function importReferenceLineFile(file) {
   }
 }
 
+function osmWaterwayName(tags = {}, index) {
+  const type = {
+    river: "Älv/å",
+    stream: "Bäck",
+    ditch: "Dike",
+    drain: "Dränering",
+    canal: "Kanal",
+  }[tags.waterway] ?? "Vattendrag";
+  return tags.name ? `${tags.name} (${type})` : `${type} ${index + 1}`;
+}
+
+async function fetchOsmWaterwaysInView() {
+  if (!state.backgroundMap) return;
+  const bounds = state.backgroundMap.getBounds();
+  const south = bounds.getSouth();
+  const west = bounds.getWest();
+  const north = bounds.getNorth();
+  const east = bounds.getEast();
+  const span = Math.max(Math.abs(north - south), Math.abs(east - west));
+  if (span > 0.25 && !window.confirm("Kartvyn är ganska stor. Det kan bli mycket data. Vill du hämta ändå?")) return;
+
+  referenceLineStatus.textContent = "Hämtar vattendragslinjer i kartvyn...";
+  const query = `
+    [out:json][timeout:25];
+    (
+      way["waterway"~"^(river|stream|ditch|drain|canal)$"](${south},${west},${north},${east});
+    );
+    out geom tags;
+  `;
+
+  try {
+    const response = await fetch("https://overpass-api.de/api/interpreter", {
+      method: "POST",
+      body: `data=${encodeURIComponent(query)}`,
+    });
+    if (!response.ok) throw new Error("Overpass svarade inte.");
+    const data = await response.json();
+    const lines = (data.elements ?? [])
+      .filter((element) => element.type === "way" && element.geometry?.length > 1)
+      .map((element, index) => ({
+        name: osmWaterwayName(element.tags, index),
+        points: element.geometry.map((point) => [Number(point.lon.toFixed(7)), Number(point.lat.toFixed(7))]),
+      }));
+    addReferenceLines(lines, "OpenStreetMap Overpass");
+  } catch (error) {
+    referenceLineStatus.textContent = "Kunde inte hämta linjer just nu. Testa mindre kartvy eller importera fil.";
+  }
+}
+
 function useSelectedReferenceLine() {
   const line = selectedReferenceLine();
   if (!line) return;
@@ -2426,6 +2476,7 @@ clearFieldAreaButton.addEventListener("click", clearFieldAreaDraft);
 startMappingButton.addEventListener("click", startMapping);
 skipFieldAreaButton.addEventListener("click", skipFieldArea);
 importReferenceLineButton.addEventListener("click", () => referenceLineInput.click());
+fetchOsmWaterwaysButton.addEventListener("click", fetchOsmWaterwaysInView);
 referenceLineInput.addEventListener("change", () => {
   const file = referenceLineInput.files?.[0];
   if (file) importReferenceLineFile(file);
