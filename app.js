@@ -22,20 +22,31 @@ const THEME_KEY = "infield:theme";
 const LANTMATERIET_WATERCOURSE_URL =
   "https://api.lantmateriet.se/ogc-features/v1/hydrografi/collections/WatercourseLine/items";
 const LANTMATERIET_ATTRIBUTION = "Hydrografi Direkt © Lantmäteriet, bearbetad, CC BY 4.0";
+const LANTMATERIET_WMTS_ATTRIBUTION = "Topografisk webbkarta © Lantmäteriet";
+const LANTMATERIET_WMTS_OPTIONS = {
+  minZoom: 0,
+  maxZoom: 15,
+  maxNativeZoom: 15,
+  tileSize: 256,
+  attribution: LANTMATERIET_WMTS_ATTRIBUTION,
+};
 const baseMaps = {
   "lm-muted": {
+    label: "LM nedtonad",
     url: "https://maps.lantmateriet.se/open/topowebb-ccby/v1/wmts/1.0.0/topowebb_nedtonad/default/3857/{z}/{y}/{x}.png",
-    options: { maxZoom: 15, attribution: "© Lantmäteriet CC BY 4.0" },
-    requiresAuth: true,
+    options: LANTMATERIET_WMTS_OPTIONS,
+    fallbackOnTileError: true,
   },
   "lm-topo": {
+    label: "LM topo",
     url: "https://maps.lantmateriet.se/open/topowebb-ccby/v1/wmts/1.0.0/topowebb/default/3857/{z}/{y}/{x}.png",
-    options: { maxZoom: 15, attribution: "© Lantmäteriet CC BY 4.0" },
-    requiresAuth: true,
+    options: LANTMATERIET_WMTS_OPTIONS,
+    fallbackOnTileError: true,
   },
   osm: {
+    label: "OSM",
     url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
-    options: { maxZoom: 19, attribution: "&copy; OpenStreetMap contributors" },
+    options: { minZoom: 0, maxZoom: 19, maxNativeZoom: 19, attribution: "&copy; OpenStreetMap contributors" },
   },
 };
 
@@ -634,21 +645,61 @@ function makeSvg(name, attributes = {}) {
   return element;
 }
 
-function setBaseMap(id = basemapSelect?.value ?? "osm") {
+function logTileError(baseMapId, event) {
+  const coords = event.coords ?? {};
+  const tileUrl = event.tile?.src || event.url || "";
+  console.warn("[InField basemap tile error]", {
+    baseMapId,
+    label: baseMaps[baseMapId]?.label ?? baseMapId,
+    tilematrixset: baseMapId?.startsWith("lm-") ? "3857" : "xyz",
+    z: coords.z,
+    x: coords.x,
+    y: coords.y,
+    url: tileUrl,
+    error: event.error?.message ?? event.error ?? null,
+  });
+}
+
+function attachBaseMapDiagnostics(layer, baseMapId) {
+  let errorCount = 0;
+  layer.on?.("tileerror", (event) => {
+    errorCount += 1;
+    logTileError(baseMapId, event);
+    if (baseMaps[baseMapId]?.fallbackOnTileError && errorCount === 4 && basemapSelect?.value === baseMapId) {
+      console.warn("[InField basemap fallback]", `Faller tillbaka till OSM efter ${errorCount} tile-fel för ${baseMapId}.`);
+      setBaseMap("osm", { remember: false });
+    }
+  });
+  layer.on?.("tileloadstart", (event) => {
+    if (!baseMaps[baseMapId]?.fallbackOnTileError) return;
+    const coords = event.coords ?? {};
+    if (coords.z > (baseMaps[baseMapId].options.maxNativeZoom ?? baseMaps[baseMapId].options.maxZoom)) {
+      console.warn("[InField basemap zoom warning]", {
+        baseMapId,
+        z: coords.z,
+        maxNativeZoom: baseMaps[baseMapId].options.maxNativeZoom,
+      });
+    }
+  });
+}
+
+function setBaseMap(id = basemapSelect?.value ?? "osm", options = {}) {
   if (!state.backgroundMap || !window.L) return;
   const requestedId = baseMaps[id] ? id : "osm";
-  const auth = savedLantmaterietToken();
-  const canUseTileAuth = auth.includes(":");
-  const nextId = baseMaps[requestedId].requiresAuth && !canUseTileAuth ? "osm" : requestedId;
+  const nextId = requestedId;
   if (state.baseMapLayer) state.backgroundMap.removeLayer(state.baseMapLayer);
   const config = baseMaps[nextId];
-  state.baseMapLayer = config.requiresAuth
-    ? authenticatedTileLayer(config.url, config.options, auth)
-    : window.L.tileLayer(config.url, config.options);
+  state.backgroundMap.setMinZoom(config.options.minZoom ?? 0);
+  state.backgroundMap.setMaxZoom(config.options.maxZoom ?? 19);
+  if (state.backgroundMap.getZoom() > (config.options.maxZoom ?? 19)) {
+    state.backgroundMap.setZoom(config.options.maxZoom ?? 19, { animate: false });
+  }
+  state.baseMapLayer = window.L.tileLayer(config.url, config.options);
+  attachBaseMapDiagnostics(state.baseMapLayer, nextId);
   state.baseMapLayer.addTo(state.backgroundMap);
   state.baseMapLayer.bringToBack();
   if (basemapSelect) basemapSelect.value = nextId;
-  localStorage.setItem(BASEMAP_KEY, nextId);
+  if (options.remember !== false) localStorage.setItem(BASEMAP_KEY, nextId);
 }
 
 function base64Encode(value) {
@@ -658,35 +709,6 @@ function base64Encode(value) {
 function authorizationHeader(auth) {
   if (!auth) return "";
   return auth.includes(":") ? `Basic ${base64Encode(auth)}` : `Bearer ${auth}`;
-}
-
-function authenticatedTileLayer(urlTemplate, options, auth) {
-  return window.L.GridLayer.extend({
-    createTile(coords, done) {
-      const tile = document.createElement("img");
-      tile.alt = "";
-      const url = window.L.Util.template(urlTemplate, {
-        ...coords,
-      });
-      fetch(url, {
-        headers: { Authorization: authorizationHeader(auth) },
-      })
-        .then((response) => {
-          if (!response.ok) throw new Error(`Tile ${response.status}`);
-          return response.blob();
-        })
-        .then((blob) => {
-          const objectUrl = URL.createObjectURL(blob);
-          tile.onload = () => URL.revokeObjectURL(objectUrl);
-          tile.src = objectUrl;
-          done(null, tile);
-        })
-        .catch((error) => {
-          done(error, tile);
-        });
-      return tile;
-    },
-  })(options);
 }
 
 function setTheme(theme = localStorage.getItem(THEME_KEY) ?? "dark") {
@@ -954,13 +976,48 @@ function normalizeFieldPackage(fieldPackage) {
   return fieldPackage;
 }
 
+function firstReadableValue(value) {
+  if (value === null || value === undefined) return "";
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const readable = firstReadableValue(item);
+      if (readable) return readable;
+    }
+    return "";
+  }
+  if (typeof value === "object") {
+    return firstReadableValue(value.text ?? value.name ?? value.namn ?? value.Name ?? value.NAMN ?? value.value ?? value.id ?? value.Id);
+  }
+  return String(value).trim();
+}
+
+function safeReferenceLineName(line, fallback = "Namnlös vattendragslinje") {
+  const properties = line?.properties ?? {};
+  const readable = firstReadableValue(
+    line?.displayName ??
+      line?.name ??
+      properties.geographicalName ??
+      properties["geographicalName.text"] ??
+      properties.namn ??
+      properties.name ??
+      properties.NAMN ??
+      properties.Name ??
+      properties.Id ??
+      properties.id,
+  );
+  return readable || fallback;
+}
+
 function normalizeReferenceLine(line) {
+  const properties = line.properties ?? {};
+  const displayName = safeReferenceLineName({ ...line, properties });
   return {
     id: line.id ?? crypto.randomUUID(),
-    name: line.name ?? "Importerad stödlinje",
+    name: displayName,
+    displayName,
     source: line.source ?? "",
     license: line.license ?? "",
-    properties: line.properties ?? {},
+    properties,
     points: normalizePoints(line.points ?? []),
   };
 }
@@ -1000,7 +1057,7 @@ function toggleReferenceLineSelection(id) {
 }
 
 function referenceLineSortKey(line) {
-  return (line.name ?? "").replace(/\s+\d+$/, "").trim().toLocaleLowerCase("sv-SE");
+  return safeReferenceLineName(line).replace(/\s+\d+$/, "").trim().toLocaleLowerCase("sv-SE");
 }
 
 function setTool(tool) {
@@ -1488,7 +1545,8 @@ function renderFieldPackages() {
       }).addTo(state.leafletLayers.references);
       layer.on("click", () => {
         toggleReferenceLineSelection(line.id);
-        referenceLineStatus.textContent = isReferenceLineSelected(line) ? `Vald stödlinje: ${line.name}` : `Avmarkerad stödlinje: ${line.name}`;
+        const lineName = safeReferenceLineName(line);
+        referenceLineStatus.textContent = isReferenceLineSelected(line) ? `Vald stödlinje: ${lineName}` : `Avmarkerad stödlinje: ${lineName}`;
         saveProject();
         render();
       });
@@ -1718,13 +1776,14 @@ function renderLists() {
     .sort((a, b) => {
       const nameSort = referenceLineSortKey(a).localeCompare(referenceLineSortKey(b), "sv-SE", { numeric: true });
       if (nameSort) return nameSort;
-      return (a.name ?? "").localeCompare(b.name ?? "", "sv-SE", { numeric: true });
+      return safeReferenceLineName(a).localeCompare(safeReferenceLineName(b), "sv-SE", { numeric: true });
     })
     .forEach((line) => {
     const li = document.createElement("li");
     const selected = isReferenceLineSelected(line);
+    const lineName = safeReferenceLineName(line);
     li.className = selected ? "selected compact" : "compact";
-    li.innerHTML = `<strong>${line.name}</strong><span>${formatLength(line.points)} · ${line.points.length} punkter</span><div class="list-actions"><button class="quiet-button" data-select-reference-line="${line.id}">${selected ? "Vald" : "Välj"}</button><button class="danger-button" data-delete-reference-line="${line.id}">Ta bort</button></div>`;
+    li.innerHTML = `<strong>${lineName}</strong><span>${formatLength(line.points)} · ${line.points.length} punkter</span><div class="list-actions"><button class="quiet-button" data-select-reference-line="${line.id}">${selected ? "Vald" : "Välj"}</button><button class="danger-button" data-delete-reference-line="${line.id}">Ta bort</button></div>`;
     referenceLineList.append(li);
   });
 
@@ -1985,22 +2044,17 @@ function fieldBufferMeters() {
 }
 
 function featureName(feature, fallback) {
-  const geographicalName = feature?.properties?.geographicalName;
-  const firstName = Array.isArray(geographicalName)
-    ? geographicalName.find((item) => item?.text)?.text
-    : null;
-  const flatName = feature?.properties?.["geographicalName.text"];
-  const firstFlatName = Array.isArray(flatName) ? flatName.find(Boolean) : flatName;
+  const properties = feature?.properties ?? {};
   return (
-    firstName ||
-    firstFlatName ||
-    feature?.properties?.namn ||
-    feature?.properties?.name ||
-    feature?.properties?.NAMN ||
-    feature?.properties?.Name ||
-    feature?.properties?.Id ||
-    feature?.properties?.id ||
-    feature?.id ||
+    firstReadableValue(
+      properties.geographicalName ??
+        properties["geographicalName.text"] ??
+        properties.namn ??
+        properties.name ??
+        properties.NAMN ??
+        properties.Name,
+    ) ||
+    firstReadableValue(properties.Id ?? properties.id ?? feature?.id) ||
     fallback
   );
 }
@@ -2012,7 +2066,7 @@ function addReferenceLines(lines, source = "", options = {}) {
         ...line,
         source,
         license: line.license ?? options.license ?? "",
-        name: line.name || `Stödlinje ${state.referenceLines.length + index + 1}`,
+        name: safeReferenceLineName(line, `Stödlinje ${state.referenceLines.length + index + 1}`),
       })
     )
     .filter((line) => line.points.length > 1);
@@ -2762,7 +2816,8 @@ referenceLineList.addEventListener("click", (event) => {
     toggleReferenceLineSelection(selectId);
     const line = state.referenceLines.find((item) => item.id === selectId);
     if (line) {
-      referenceLineStatus.textContent = isReferenceLineSelected(line) ? `Vald stödlinje: ${line.name}` : `Avmarkerad stödlinje: ${line.name}`;
+      const lineName = safeReferenceLineName(line);
+      referenceLineStatus.textContent = isReferenceLineSelected(line) ? `Vald stödlinje: ${lineName}` : `Avmarkerad stödlinje: ${lineName}`;
     }
     saveProject();
     render();
