@@ -293,12 +293,50 @@ function distance(a, b) {
 }
 
 function sectionLength(points) {
-  return points.slice(1).reduce((sum, point, index) => sum + distance(points[index], point), 0);
+  return points.slice(1).reduce((sum, point, index) => sum + mapDistance(points[index], point), 0);
 }
 
 function formatLength(points) {
-  const meters = sectionLength(points) * 1.8;
+  const meters = sectionLength(points);
   return meters > 1000 ? `${(meters / 1000).toFixed(2)} km` : `${Math.round(meters)} m`;
+}
+
+function isGeoPoint(point) {
+  return Array.isArray(point) && Math.abs(point[0]) <= 180 && Math.abs(point[1]) <= 90;
+}
+
+function staticSvgPointToGeo(point) {
+  const baseLat = defaultMapCenter[0];
+  const baseLon = defaultMapCenter[1];
+  const lon = baseLon + (point[0] - 500) / 12000;
+  const lat = baseLat - (point[1] - 390) / 18000;
+  return [Number(lon.toFixed(7)), Number(lat.toFixed(7))];
+}
+
+function normalizePoint(point) {
+  return isGeoPoint(point) ? point : staticSvgPointToGeo(point);
+}
+
+function normalizePoints(points = []) {
+  return points.map(normalizePoint);
+}
+
+function toLatLng(point) {
+  const [lon, lat] = normalizePoint(point);
+  return [lat, lon];
+}
+
+function toLatLngs(points = []) {
+  return points.map(toLatLng);
+}
+
+function fromLatLng(latlng) {
+  return [Number(latlng.lng.toFixed(7)), Number(latlng.lat.toFixed(7))];
+}
+
+function mapDistance(a, b) {
+  if (window.L) return window.L.latLng(toLatLng(a)).distanceTo(window.L.latLng(toLatLng(b)));
+  return distance(a, b);
 }
 
 function closestOnSegment(point, a, b) {
@@ -360,9 +398,9 @@ function projectGpsToMap(position) {
 }
 
 function mapPointToGeo(point) {
+  if (isGeoPoint(point)) return point;
   if (state.backgroundMap) {
-    const latLng = state.backgroundMap.containerPointToLatLng(svgPointToContainer(point));
-    return [Number(latLng.lng.toFixed(7)), Number(latLng.lat.toFixed(7))];
+    return staticSvgPointToGeo(point);
   }
   const baseLat = defaultMapCenter[0];
   const baseLon = defaultMapCenter[1];
@@ -385,7 +423,27 @@ function renderGps() {
   gpsLayer.innerHTML = "";
   gpsToggleButton.classList.toggle("active", state.gpsEnabled);
   gpsToggleButton.setAttribute("aria-pressed", String(state.gpsEnabled));
+  state.leafletLayers?.gps?.clearLayers();
   if (!state.gpsPosition) return;
+  if (state.leafletLayers?.gps && window.L) {
+    const latLng = [state.gpsPosition.coords.latitude, state.gpsPosition.coords.longitude];
+    const accuracy = state.gpsPosition.coords.accuracy ?? 20;
+    window.L.circle(latLng, {
+      radius: accuracy,
+      color: "rgba(37, 99, 235, 0.45)",
+      weight: 2,
+      fillColor: "rgba(37, 99, 235, 0.16)",
+      fillOpacity: 1,
+    }).addTo(state.leafletLayers.gps);
+    window.L.circleMarker(latLng, {
+      radius: 8,
+      color: "#ffffff",
+      weight: 3,
+      fillColor: "#2563eb",
+      fillOpacity: 1,
+    }).addTo(state.leafletLayers.gps);
+    return;
+  }
   const [x, y] = projectGpsToMap(state.gpsPosition);
   const accuracy = Math.max(16, Math.min(90, (state.gpsPosition.coords.accuracy ?? 20) / 2));
   gpsLayer.append(makeSvg("circle", { cx: x, cy: y, r: accuracy, class: "gps-accuracy" }));
@@ -486,6 +544,13 @@ function initBackgroundMap() {
   }).addTo(background);
   background.on("move zoom", renderGps);
   state.backgroundMap = background;
+  state.leafletLayers = {
+    field: window.L.layerGroup().addTo(background),
+    sections: window.L.layerGroup().addTo(background),
+    objects: window.L.layerGroup().addTo(background),
+    gps: window.L.layerGroup().addTo(background),
+  };
+  background.on("click", handleLeafletMapClick);
   map.classList.add("map-dimmed");
   setTool(state.tool);
   setTimeout(() => background.invalidateSize(), 150);
@@ -601,9 +666,9 @@ function openWatercourse(name, saveCurrent = true) {
     const payload = JSON.parse(saved);
     state.activeSection = payload.activeSection ? normalizeSectionAttributes(payload.activeSection) : null;
     state.sections = (payload.sections ?? []).map(normalizeSectionAttributes);
-    state.objects = payload.objects ?? [];
+    state.objects = (payload.objects ?? []).map(normalizeObjectGeometry);
     state.photos = payload.photos ?? [];
-    state.fieldPackages = payload.fieldPackages ?? [];
+    state.fieldPackages = (payload.fieldPackages ?? []).map(normalizeFieldPackage);
     state.draftFieldReach = [];
     state.projectMeta = { ...defaultProjectMeta(), ...(payload.projectMeta ?? {}) };
     syncProjectMetaToForm();
@@ -682,7 +747,28 @@ function groupVisibleForPart(group, attrs) {
 
 function normalizeSectionAttributes(section) {
   section.attributes = { ...defaultProtocolAttributes(), ...(section.attributes ?? {}) };
+  section.points = normalizePoints(section.points ?? []);
   return section;
+}
+
+function normalizeObjectGeometry(object) {
+  if (!object?.geometry) return object;
+  if (object.geometry.type === "Point") {
+    object.geometry.coordinates = normalizePoint(object.geometry.coordinates);
+  }
+  if (object.geometry.type === "LineString") {
+    object.geometry.coordinates = normalizePoints(object.geometry.coordinates);
+  }
+  if (object.geometry.type === "Polygon") {
+    object.geometry.coordinates = (object.geometry.coordinates ?? []).map(normalizePoints);
+  }
+  return object;
+}
+
+function normalizeFieldPackage(fieldPackage) {
+  fieldPackage.plannedReach = normalizePoints(fieldPackage.plannedReach ?? []);
+  fieldPackage.fieldArea = normalizePoints(fieldPackage.fieldArea ?? []);
+  return fieldPackage;
 }
 
 function setTool(tool) {
@@ -691,9 +777,9 @@ function setTool(tool) {
   if (["point", "line", "area"].includes(tool)) updateObjectTypeSelect(tool);
   document.querySelectorAll(".icon-button").forEach((button) => button.classList.remove("active"));
   document.querySelector(`#tool-${tool}`)?.classList.add("active");
-  map.classList.toggle("drawing-active", tool !== "pan");
+  map.classList.toggle("drawing-active", !state.backgroundMap && tool !== "pan");
   map.classList.toggle("pan-active", tool === "pan");
-  map.style.pointerEvents = tool === "pan" ? "none" : "auto";
+  map.style.pointerEvents = state.backgroundMap ? "none" : tool === "pan" ? "none" : "auto";
   if (state.backgroundMap) {
     if (tool === "pan") {
       state.backgroundMap.dragging.enable();
@@ -912,6 +998,13 @@ function objectStyleClass(typeLabel) {
   return "";
 }
 
+function leafletObjectStyle(typeLabel) {
+  const styleClass = objectStyleClass(typeLabel);
+  if (styleClass === "sidogren") return { stroke: "#176bad", fill: "#62a8df" };
+  if (styleClass === "oversvamningsyta") return { stroke: "#c59112", fill: "#f4c542" };
+  return { stroke: "#176b63", fill: "#f4c542" };
+}
+
 function orderedObjectTypes(tool, selected = "") {
   const preferred = objectTypeOptionsByGeometry[tool] ?? [];
   const merged = [...preferred, ...fallbackObjectTypes];
@@ -1075,9 +1168,43 @@ function updateCalculatedProtocolFields() {
 
 function renderSections() {
   sectionsLayer.innerHTML = "";
+  state.leafletLayers?.sections?.clearLayers();
   const allSections = [...state.sections, state.activeSection].filter(Boolean);
   allSections.forEach((section) => {
-    if (section.points.length < 2) return;
+    if (section.points.length < 2) {
+      if (section.points.length === 1 && state.leafletLayers?.sections && window.L) {
+        window.L.circleMarker(toLatLng(section.points[0]), {
+          radius: 8,
+          color: "#ffffff",
+          weight: 3,
+          fillColor: "#1f9d55",
+          fillOpacity: 1,
+        }).addTo(state.leafletLayers.sections);
+      }
+      return;
+    }
+    if (state.leafletLayers?.sections && window.L) {
+      window.L.polyline(toLatLngs(section.points), {
+        color: section.status === "drawing" ? "#111827" : "#b84a3a",
+        weight: section.status === "drawing" ? 7 : 8,
+        opacity: 0.95,
+      }).addTo(state.leafletLayers.sections);
+      window.L.circleMarker(toLatLng(section.points[0]), {
+        radius: 8,
+        color: "#ffffff",
+        weight: 3,
+        fillColor: "#1f9d55",
+        fillOpacity: 1,
+      }).addTo(state.leafletLayers.sections);
+      window.L.circleMarker(toLatLng(section.points.at(-1)), {
+        radius: 8,
+        color: "#ffffff",
+        weight: 3,
+        fillColor: "#d7332f",
+        fillOpacity: 1,
+      }).addTo(state.leafletLayers.sections);
+      return;
+    }
     sectionsLayer.append(
       makeSvg("path", {
         d: pathFromPoints(section.points),
@@ -1095,7 +1222,26 @@ function renderSections() {
 
 function renderFieldPackages() {
   fieldLayer.innerHTML = "";
+  state.leafletLayers?.field?.clearLayers();
   state.fieldPackages.forEach((fieldPackage) => {
+    if (state.leafletLayers?.field && window.L) {
+      if (fieldPackage.fieldArea?.length) {
+        window.L.polygon(toLatLngs(fieldPackage.fieldArea), {
+          color: "#2563eb",
+          weight: 2,
+          dashArray: "10 8",
+          fillColor: "#3b82f6",
+          fillOpacity: 0.16,
+        }).addTo(state.leafletLayers.field);
+      }
+      if (fieldPackage.plannedReach?.length > 1) {
+        window.L.polyline(toLatLngs(fieldPackage.plannedReach), {
+          color: "#2563eb",
+          weight: 5,
+        }).addTo(state.leafletLayers.field);
+      }
+      return;
+    }
     if (fieldPackage.fieldArea?.length) {
       fieldLayer.append(
         makeSvg("path", {
@@ -1114,6 +1260,21 @@ function renderFieldPackages() {
     }
   });
   if (state.draftFieldReach.length) {
+    if (state.leafletLayers?.field && window.L) {
+      if (state.draftFieldReach.length > 1) {
+        window.L.polyline(toLatLngs(state.draftFieldReach), { color: "#2563eb", weight: 5 }).addTo(state.leafletLayers.field);
+      }
+      state.draftFieldReach.forEach((point) => {
+        window.L.circleMarker(toLatLng(point), {
+          radius: 7,
+          color: "#111827",
+          weight: 2,
+          fillColor: "#ffffff",
+          fillOpacity: 1,
+        }).addTo(state.leafletLayers.field);
+      });
+      return;
+    }
     fieldLayer.append(
       makeSvg("path", {
         d: pathFromPoints(state.draftFieldReach),
@@ -1128,6 +1289,7 @@ function renderFieldPackages() {
 
 function renderVertices() {
   verticesLayer.innerHTML = "";
+  if (state.backgroundMap) return;
   if (!state.activeSection) return;
   state.activeSection.points.forEach((point, index) => {
     const isStart = index === 0;
@@ -1145,7 +1307,50 @@ function renderVertices() {
 
 function renderObjects() {
   objectsLayer.innerHTML = "";
+  state.leafletLayers?.objects?.clearLayers();
   state.objects.forEach((object) => {
+    if (state.leafletLayers?.objects && window.L) {
+      const style = leafletObjectStyle(object.typeLabel);
+      if (object.geometry.type === "Point") {
+        window.L.circleMarker(toLatLng(object.geometry.coordinates), {
+          radius: 8,
+          color: style.stroke,
+          weight: 3,
+          fillColor: style.fill,
+          fillOpacity: 1,
+        })
+          .on("click", (event) => {
+            window.L.DomEvent.stopPropagation(event);
+            selectObject(object.id);
+          })
+          .addTo(state.leafletLayers.objects);
+      }
+      if (object.geometry.type === "LineString") {
+        window.L.polyline(toLatLngs(object.geometry.coordinates), {
+          color: style.stroke,
+          weight: 5,
+        })
+          .on("click", (event) => {
+            window.L.DomEvent.stopPropagation(event);
+            selectObject(object.id);
+          })
+          .addTo(state.leafletLayers.objects);
+      }
+      if (object.geometry.type === "Polygon") {
+        window.L.polygon(toLatLngs(object.geometry.coordinates[0] ?? []), {
+          color: style.stroke,
+          weight: 4,
+          fillColor: style.fill,
+          fillOpacity: 0.3,
+        })
+          .on("click", (event) => {
+            window.L.DomEvent.stopPropagation(event);
+            selectObject(object.id);
+          })
+          .addTo(state.leafletLayers.objects);
+      }
+      return;
+    }
     if (object.geometry.type === "Point") {
       const [x, y] = object.geometry.coordinates;
       objectsLayer.append(
@@ -1182,6 +1387,31 @@ function renderObjects() {
   previewLayer.innerHTML = "";
   if (state.tempObject?.points?.length) {
     const points = state.tempObject.points;
+    if (state.leafletLayers?.objects && window.L) {
+      const style = leafletObjectStyle(objectType.value);
+      if (state.tempObject.type === "line" && points.length > 1) {
+        window.L.polyline(toLatLngs(points), { color: style.stroke, weight: 5, dashArray: "8 6" }).addTo(state.leafletLayers.objects);
+      }
+      if (state.tempObject.type === "area" && points.length > 1) {
+        window.L.polygon(toLatLngs(points), {
+          color: style.stroke,
+          weight: 4,
+          dashArray: "8 6",
+          fillColor: style.fill,
+          fillOpacity: 0.2,
+        }).addTo(state.leafletLayers.objects);
+      }
+      points.forEach((point) => {
+        window.L.circleMarker(toLatLng(point), {
+          radius: 6,
+          color: "#111827",
+          weight: 2,
+          fillColor: "#ffffff",
+          fillOpacity: 1,
+        }).addTo(state.leafletLayers.objects);
+      });
+      return;
+    }
     const previewClass = objectStyleClass(objectType.value);
     if (state.tempObject.type === "line") {
       previewLayer.append(makeSvg("path", { d: pathFromPoints(points), class: `object-line ${previewClass}` }));
@@ -1418,30 +1648,50 @@ function closeRing(points) {
 function bufferReach(points, bufferMeters) {
   if (!points?.length) return [];
   if (points.length === 1) {
-    const radius = bufferMeters / 1.8;
-    const [x, y] = points[0];
+    const [x, y] = lonLatToMeters(points[0], points[0]);
+    const radius = bufferMeters;
+    const origin = points[0];
     return [
-      [x - radius, y - radius],
-      [x + radius, y - radius],
-      [x + radius, y + radius],
-      [x - radius, y + radius],
-      [x - radius, y - radius],
+      metersToLonLat([x - radius, y - radius], origin),
+      metersToLonLat([x + radius, y - radius], origin),
+      metersToLonLat([x + radius, y + radius], origin),
+      metersToLonLat([x - radius, y + radius], origin),
+      metersToLonLat([x - radius, y - radius], origin),
     ];
   }
-  const start = points[0];
-  const stop = points.at(-1);
+  const origin = points[0];
+  const start = lonLatToMeters(points[0], origin);
+  const stop = lonLatToMeters(points.at(-1), origin);
   const dx = stop[0] - start[0];
   const dy = stop[1] - start[1];
   const len = Math.hypot(dx, dy) || 1;
-  const offset = bufferMeters / 1.8;
+  const offset = bufferMeters;
   const ox = (-dy / len) * offset;
   const oy = (dx / len) * offset;
   return [
-    [start[0] + ox, start[1] + oy],
-    [stop[0] + ox, stop[1] + oy],
-    [stop[0] - ox, stop[1] - oy],
-    [start[0] - ox, start[1] - oy],
-    [start[0] + ox, start[1] + oy],
+    metersToLonLat([start[0] + ox, start[1] + oy], origin),
+    metersToLonLat([stop[0] + ox, stop[1] + oy], origin),
+    metersToLonLat([stop[0] - ox, stop[1] - oy], origin),
+    metersToLonLat([start[0] - ox, start[1] - oy], origin),
+    metersToLonLat([start[0] + ox, start[1] + oy], origin),
+  ];
+}
+
+function lonLatToMeters(point, origin) {
+  const [lon, lat] = normalizePoint(point);
+  const [originLon, originLat] = normalizePoint(origin);
+  const metersPerDegreeLat = 111320;
+  const metersPerDegreeLon = Math.cos((originLat * Math.PI) / 180) * metersPerDegreeLat || metersPerDegreeLat;
+  return [(lon - originLon) * metersPerDegreeLon, (lat - originLat) * metersPerDegreeLat];
+}
+
+function metersToLonLat(point, origin) {
+  const [originLon, originLat] = normalizePoint(origin);
+  const metersPerDegreeLat = 111320;
+  const metersPerDegreeLon = Math.cos((originLat * Math.PI) / 180) * metersPerDegreeLat || metersPerDegreeLat;
+  return [
+    Number((originLon + point[0] / metersPerDegreeLon).toFixed(7)),
+    Number((originLat + point[1] / metersPerDegreeLat).toFixed(7)),
   ];
 }
 
@@ -1711,26 +1961,14 @@ function openExportMail(watercourse, zipName) {
   window.location.href = `mailto:?subject=${subject}&body=${body}`;
 }
 
-function handleMapClick(event) {
+function handlePointInMap(point) {
   if (state.tool === "pan") return;
-  if (event.target.dataset.objectId) {
-    selectObject(event.target.dataset.objectId);
-    return;
-  }
-  if (state.dragging) return;
-  const point = svgPoint(event);
   if (state.tool === "section") {
     if (!state.activeSection) return;
-    const snapped = state.useSupportLine ? snapToSupport(point) : { point };
     if (!state.activeSection.startConfirmed) {
-      state.activeSection.points = [snapped.point];
+      state.activeSection.points = [point];
     } else {
-      if (state.useSupportLine) {
-        const startSnap = snapToSupport(state.activeSection.points[0]);
-        state.activeSection.points = supportSlice(startSnap, snapped);
-      } else {
-        state.activeSection.points = [state.activeSection.points[0], point];
-      }
+      state.activeSection.points = [state.activeSection.points[0], point];
     }
   } else if (state.tool === "point") {
     addObjectPoint(point);
@@ -1743,6 +1981,21 @@ function handleMapClick(event) {
     addObjectVertex(point);
   }
   render();
+}
+
+function handleLeafletMapClick(event) {
+  handlePointInMap(fromLatLng(event.latlng));
+}
+
+function handleMapClick(event) {
+  if (state.backgroundMap) return;
+  if (state.tool === "pan") return;
+  if (event.target.dataset.objectId) {
+    selectObject(event.target.dataset.objectId);
+    return;
+  }
+  if (state.dragging) return;
+  handlePointInMap(svgPoint(event));
 }
 
 function startDrag(event) {

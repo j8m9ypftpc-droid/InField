@@ -291,9 +291,10 @@ input {
   position: absolute;
   z-index: 5;
   top: 66px;
-  left: 18px;
-  transform: none;
-  display: grid;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-wrap: nowrap;
   gap: 8px;
   padding: 8px;
   background: rgba(255, 255, 255, 0.92);
