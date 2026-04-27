@@ -162,6 +162,16 @@
               </select>
             </div>
             <p class="status-hint">Steg 2: tryck Rita planerad str?cka och g?r punkter l?ngs vattendraget du t?nker kartera.</p>
+            <div class="field-group">
+              <label>Stödlinje</label>
+              <div class="object-actions">
+                <button id="import-reference-line-button" class="secondary-button" type="button">Importera linje</button>
+                <button id="use-reference-line-button" class="quiet-button" type="button" disabled>Använd vald linje</button>
+              </div>
+              <input id="reference-line-input" type="file" accept=".geojson,.json,.kml,application/geo+json,application/json,application/vnd.google-earth.kml+xml" hidden />
+              <p id="reference-line-status" class="status-hint">Ingen stödlinje importerad.</p>
+              <ul id="reference-line-list" class="item-list reference-line-list"></ul>
+            </div>
             <div class="object-actions">
               <button id="draw-field-reach-button" class="secondary-button" type="button">Rita planerad sträcka</button>
               <button id="prepare-field-area-button" class="primary-button" type="button">Ladda område</button>

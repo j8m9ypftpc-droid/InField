@@ -224,6 +224,8 @@ const state = {
   photos: [],
   fieldPackages: [],
   draftFieldReach: [],
+  referenceLines: [],
+  selectedReferenceLineId: null,
   mappingStarted: false,
   tool: "pan",
   lastObjectTool: "point",
@@ -304,6 +306,11 @@ const fieldStepPanel = document.querySelector("#field-step-panel");
 const mappingWorkspace = document.querySelector("#mapping-workspace");
 const startMappingButton = document.querySelector("#start-mapping-button");
 const skipFieldAreaButton = document.querySelector("#skip-field-area-button");
+const importReferenceLineButton = document.querySelector("#import-reference-line-button");
+const referenceLineInput = document.querySelector("#reference-line-input");
+const referenceLineStatus = document.querySelector("#reference-line-status");
+const referenceLineList = document.querySelector("#reference-line-list");
+const useReferenceLineButton = document.querySelector("#use-reference-line-button");
 const exportDialog = document.querySelector("#export-dialog");
 const exportStatusText = document.querySelector("#export-status-text");
 const exportShareButton = document.querySelector("#export-share-button");
@@ -615,6 +622,7 @@ function initBackgroundMap() {
   state.backgroundMap = background;
   state.leafletLayers = {
     field: window.L.layerGroup().addTo(background),
+    references: window.L.layerGroup().addTo(background),
     sections: window.L.layerGroup().addTo(background),
     objects: window.L.layerGroup().addTo(background),
     gps: window.L.layerGroup().addTo(background),
@@ -704,6 +712,8 @@ function saveProject(options = {}) {
     objects: state.objects,
     photos: state.photos,
     fieldPackages: state.fieldPackages,
+    referenceLines: state.referenceLines,
+    selectedReferenceLineId: state.selectedReferenceLineId,
     mappingStarted: state.mappingStarted,
     projectMeta: state.projectMeta,
     savedAt: new Date().toISOString(),
@@ -740,6 +750,8 @@ function openWatercourse(name, saveCurrent = true) {
     state.objects = (payload.objects ?? []).map(normalizeObjectGeometry);
     state.photos = payload.photos ?? [];
     state.fieldPackages = (payload.fieldPackages ?? []).map(normalizeFieldPackage);
+    state.referenceLines = (payload.referenceLines ?? []).map(normalizeReferenceLine);
+    state.selectedReferenceLineId = payload.selectedReferenceLineId ?? state.referenceLines[0]?.id ?? null;
     state.draftFieldReach = [];
     state.mappingStarted = Boolean(payload.mappingStarted || (payload.sections?.length ?? 0) > 0 || payload.activeSection);
     state.projectMeta = { ...defaultProjectMeta(), ...(payload.projectMeta ?? {}) };
@@ -753,6 +765,8 @@ function openWatercourse(name, saveCurrent = true) {
     state.objects = [];
     state.photos = [];
     state.fieldPackages = [];
+    state.referenceLines = [];
+    state.selectedReferenceLineId = null;
     state.draftFieldReach = [];
     state.mappingStarted = false;
     state.projectMeta = defaultProjectMeta();
@@ -838,6 +852,19 @@ function normalizeFieldPackage(fieldPackage) {
   fieldPackage.plannedReach = normalizePoints(fieldPackage.plannedReach ?? []);
   fieldPackage.fieldArea = normalizePoints(fieldPackage.fieldArea ?? []);
   return fieldPackage;
+}
+
+function normalizeReferenceLine(line) {
+  return {
+    id: line.id ?? crypto.randomUUID(),
+    name: line.name ?? "Importerad stödlinje",
+    source: line.source ?? "",
+    points: normalizePoints(line.points ?? []),
+  };
+}
+
+function selectedReferenceLine() {
+  return state.referenceLines.find((line) => line.id === state.selectedReferenceLineId) ?? null;
 }
 
 function setTool(tool) {
@@ -1311,7 +1338,26 @@ function renderSections() {
 
 function renderFieldPackages() {
   fieldLayer.innerHTML = "";
+  state.leafletLayers?.references?.clearLayers();
   state.leafletLayers?.field?.clearLayers();
+  state.referenceLines.forEach((line) => {
+    if (line.points.length < 2) return;
+    const selected = line.id === state.selectedReferenceLineId;
+    if (state.leafletLayers?.references && window.L) {
+      const layer = window.L.polyline(toLatLngs(line.points), {
+        color: selected ? "#0f766e" : "#64748b",
+        weight: selected ? 6 : 4,
+        opacity: selected ? 0.95 : 0.65,
+        dashArray: selected ? null : "8 8",
+      }).addTo(state.leafletLayers.references);
+      layer.on("click", () => {
+        state.selectedReferenceLineId = line.id;
+        referenceLineStatus.textContent = `Vald stödlinje: ${line.name}`;
+        saveProject();
+        render();
+      });
+    }
+  });
   state.fieldPackages.forEach((fieldPackage) => {
     if (state.leafletLayers?.field && window.L) {
       if (fieldPackage.fieldArea?.length) {
@@ -1551,6 +1597,20 @@ function renderLists() {
       ? `<strong>${draft.typeLabel}</strong><span>${geometryLabel} · Sträcka ${section?.number ?? "-"}</span><div class="inline-editor"><label>Objekttyp</label><select data-inline-object-type="${object.id}">${objectTypeOptions(objectGeometryTool(object), draft.typeLabel)}</select><label>Kommentar</label><textarea rows="3" data-inline-object-comment="${object.id}">${draft.comment || ""}</textarea></div>${objectPhotoMarkup(object.id)}<div class="list-actions"><button class="secondary-button" data-save-object="${object.id}">Spara</button><button class="quiet-button" data-cancel-object="${object.id}">Avbryt</button><button class="danger-button" data-delete-object="${object.id}">Ta bort</button></div>`
       : `<strong>${object.typeLabel}</strong><span>${geometryLabel} · Sträcka ${section?.number ?? "-"} · ${object.comment || "Ingen kommentar"}</span><div class="list-actions"><button class="quiet-button" data-edit-object="${object.id}">Ändra</button><button class="danger-button" data-delete-object="${object.id}">Ta bort</button></div>`;
     objectList.append(li);
+  });
+
+  referenceLineList.innerHTML = "";
+  useReferenceLineButton.disabled = !selectedReferenceLine();
+  referenceLineStatus.textContent = state.referenceLines.length
+    ? selectedReferenceLine()
+      ? `Vald stödlinje: ${selectedReferenceLine().name}`
+      : "Välj en stödlinje på kartan eller i listan."
+    : "Ingen stödlinje importerad.";
+  state.referenceLines.forEach((line) => {
+    const li = document.createElement("li");
+    li.className = line.id === state.selectedReferenceLineId ? "selected compact" : "compact";
+    li.innerHTML = `<strong>${line.name}</strong><span>${formatLength(line.points)} · ${line.points.length} punkter</span><div class="list-actions"><button class="quiet-button" data-select-reference-line="${line.id}">Välj</button><button class="danger-button" data-delete-reference-line="${line.id}">Ta bort</button></div>`;
+    referenceLineList.append(li);
   });
 
   fieldPackageList.innerHTML = "";
@@ -1821,6 +1881,95 @@ function fieldBufferMeters() {
   return Number(fieldBufferSelect.value) || 100;
 }
 
+function featureName(feature, fallback) {
+  return (
+    feature?.properties?.namn ||
+    feature?.properties?.name ||
+    feature?.properties?.NAMN ||
+    feature?.properties?.Name ||
+    fallback
+  );
+}
+
+function addReferenceLines(lines, source = "") {
+  const cleanLines = lines
+    .map((line, index) => normalizeReferenceLine({ ...line, source, name: line.name || `Stödlinje ${state.referenceLines.length + index + 1}` }))
+    .filter((line) => line.points.length > 1);
+  if (!cleanLines.length) {
+    referenceLineStatus.textContent = "Hittade ingen linje i filen.";
+    return;
+  }
+  state.referenceLines.push(...cleanLines);
+  state.selectedReferenceLineId = cleanLines[0].id;
+  referenceLineStatus.textContent = `${cleanLines.length} stödlinje${cleanLines.length === 1 ? "" : "r"} importerad${cleanLines.length === 1 ? "" : "e"}.`;
+  fitMapToPoints(cleanLines[0].points);
+  saveProject();
+  render();
+}
+
+function collectGeoJsonLines(data) {
+  const features = data.type === "FeatureCollection" ? data.features : data.type === "Feature" ? [data] : [{ geometry: data, properties: {} }];
+  const lines = [];
+  features.forEach((feature, featureIndex) => {
+    const geometry = feature.geometry ?? feature;
+    if (!geometry) return;
+    if (geometry.type === "LineString") {
+      lines.push({ name: featureName(feature, `Stödlinje ${featureIndex + 1}`), points: normalizePoints(geometry.coordinates) });
+    }
+    if (geometry.type === "MultiLineString") {
+      geometry.coordinates.forEach((points, lineIndex) => {
+        lines.push({ name: `${featureName(feature, `Stödlinje ${featureIndex + 1}`)} ${lineIndex + 1}`, points: normalizePoints(points) });
+      });
+    }
+  });
+  return lines;
+}
+
+function collectKmlLines(text) {
+  const doc = new DOMParser().parseFromString(text, "application/xml");
+  return [...doc.querySelectorAll("Placemark")].flatMap((placemark, index) => {
+    const name = placemark.querySelector("name")?.textContent?.trim() || `Stödlinje ${index + 1}`;
+    return [...placemark.querySelectorAll("LineString coordinates")].map((node, lineIndex) => ({
+      name: lineIndex ? `${name} ${lineIndex + 1}` : name,
+      points: node.textContent
+        .trim()
+        .split(/\s+/)
+        .map((coord) => coord.split(",").map(Number))
+        .filter((coord) => Number.isFinite(coord[0]) && Number.isFinite(coord[1]))
+        .map((coord) => [Number(coord[0].toFixed(7)), Number(coord[1].toFixed(7))]),
+    }));
+  });
+}
+
+function fitMapToPoints(points) {
+  if (!state.backgroundMap || !window.L || points.length < 2) return;
+  state.backgroundMap.fitBounds(window.L.latLngBounds(toLatLngs(points)).pad(0.25));
+}
+
+async function importReferenceLineFile(file) {
+  const text = await file.text();
+  try {
+    const lines = file.name.toLowerCase().endsWith(".kml")
+      ? collectKmlLines(text)
+      : collectGeoJsonLines(JSON.parse(text));
+    addReferenceLines(lines, file.name);
+  } catch (error) {
+    referenceLineStatus.textContent = "Kunde inte läsa stödlinjen. Testa GeoJSON eller KML.";
+  }
+}
+
+function useSelectedReferenceLine() {
+  const line = selectedReferenceLine();
+  if (!line) return;
+  state.draftFieldReach = [...line.points];
+  fieldStatusLabel.textContent = "Tryck Förbered område";
+  mapHint.textContent = "Vald stödlinje används som planerad fältsträcka.";
+  sideMapHint.textContent = mapHint.textContent;
+  fitMapToPoints(line.points);
+  saveProject();
+  render();
+}
+
 function prepareFieldArea() {
   if (state.draftFieldReach.length < 2) {
     fieldStatusLabel.textContent = "Ofullständigt";
@@ -1912,6 +2061,7 @@ async function exportGeoJson(projectPayload = null) {
         objects: projectPayload.objects ?? [],
         photos: projectPayload.photos ?? [],
         fieldPackages: projectPayload.fieldPackages ?? [],
+        referenceLines: projectPayload.referenceLines ?? [],
       }
     : state;
   const coordinateSystem = "WGS84 lon/lat (EPSG:4326) från kartans nuvarande position";
@@ -1978,6 +2128,17 @@ async function exportGeoJson(projectPayload = null) {
       geometry: geometryToGeo({ type: "LineString", coordinates: fieldPackage.plannedReach ?? [] }),
     },
   ]);
+  const referenceLineFeatures = (exportState.referenceLines ?? []).map((line) => ({
+    type: "Feature",
+    properties: {
+      id: line.id,
+      lager: "stodlinje",
+      vattendrag: exportState.watercourse,
+      namn: line.name,
+      kalla: line.source ?? "",
+    },
+    geometry: geometryToGeo({ type: "LineString", coordinates: line.points ?? [] }),
+  }));
   const photoMetadata = (exportState.photos ?? []).map((photo) => ({
     id: photo.id,
     vattendrag: exportState.watercourse,
@@ -1998,6 +2159,7 @@ async function exportGeoJson(projectPayload = null) {
     ["linjeobjekt", objectFeatures.filter((feature) => feature.geometry.type === "LineString")],
     ["ytobjekt", objectFeatures.filter((feature) => feature.geometry.type === "Polygon")],
     ["faltomraden", fieldPackageFeatures],
+    ["stodlinjer", referenceLineFeatures],
   ];
   const metadata = {
     vattendrag: exportState.watercourse,
@@ -2011,6 +2173,7 @@ async function exportGeoJson(projectPayload = null) {
     linjeobjekt: layers[2][1].length,
     ytobjekt: layers[3][1].length,
     faltomraden: exportState.fieldPackages?.length ?? 0,
+    stodlinjer: exportState.referenceLines?.length ?? 0,
     foton: photoMetadata.length,
   };
   if (window.JSZip) {
@@ -2147,13 +2310,26 @@ function handlePointInMap(point) {
   } else if (state.tool === "photo") {
     triggerMapPhoto();
   } else if (state.tool === "field") {
-    state.draftFieldReach.push(point);
+    const reference = selectedReferenceLine();
+    if (reference?.points?.length > 1) {
+      const snap = snapToLine(point, reference.points);
+      if (!state.draftFieldReach.length) {
+        state.draftFieldReach = [snap.point];
+      } else {
+        const startSnap = snapToLine(state.draftFieldReach[0], reference.points);
+        state.draftFieldReach = lineSlice(reference.points, startSnap, snap);
+      }
+    } else {
+      state.draftFieldReach.push(point);
+    }
     fieldStatusLabel.textContent =
       state.draftFieldReach.length > 1 ? "Tryck Förbered område" : "Ritar planerad sträcka";
     mapHint.textContent =
       state.draftFieldReach.length > 1
         ? `${state.draftFieldReach.length} punkter i planerad sträcka. Klicka längs bäcken eller tryck Förbered område.`
-        : "Lägg nästa punkt längs vattnet.";
+        : reference
+          ? "Klicka stoppunkt på stödlinjen."
+          : "Lägg nästa punkt längs vattnet.";
     sideMapHint.textContent = mapHint.textContent;
   } else {
     addObjectVertex(point);
@@ -2239,12 +2415,43 @@ drawFieldReachButton.addEventListener("click", () => {
   state.draftFieldReach = [];
   fieldStatusLabel.textContent = "Ritar planerad sträcka";
   prepareFieldAreaButton.disabled = true;
+  mapHint.textContent = selectedReferenceLine()
+    ? "Klicka start och stopp på stödlinjen."
+    : "Gör punkter längs vattendraget du tänker kartera.";
+  sideMapHint.textContent = mapHint.textContent;
   setTool("field");
 });
 prepareFieldAreaButton.addEventListener("click", prepareFieldArea);
 clearFieldAreaButton.addEventListener("click", clearFieldAreaDraft);
 startMappingButton.addEventListener("click", startMapping);
 skipFieldAreaButton.addEventListener("click", skipFieldArea);
+importReferenceLineButton.addEventListener("click", () => referenceLineInput.click());
+referenceLineInput.addEventListener("change", () => {
+  const file = referenceLineInput.files?.[0];
+  if (file) importReferenceLineFile(file);
+  referenceLineInput.value = "";
+});
+useReferenceLineButton.addEventListener("click", useSelectedReferenceLine);
+referenceLineList.addEventListener("click", (event) => {
+  const selectId = event.target.dataset.selectReferenceLine;
+  const deleteId = event.target.dataset.deleteReferenceLine;
+  if (selectId) {
+    state.selectedReferenceLineId = selectId;
+    const line = selectedReferenceLine();
+    if (line) {
+      referenceLineStatus.textContent = `Vald stödlinje: ${line.name}`;
+      fitMapToPoints(line.points);
+    }
+    saveProject();
+    render();
+  }
+  if (deleteId) {
+    state.referenceLines = state.referenceLines.filter((line) => line.id !== deleteId);
+    if (state.selectedReferenceLineId === deleteId) state.selectedReferenceLineId = state.referenceLines[0]?.id ?? null;
+    saveProject();
+    render();
+  }
+});
 fieldBufferSelect.addEventListener("change", () => {
   fieldCustomBufferWrap?.classList.toggle("hidden", fieldBufferSelect.value !== "custom");
 });
