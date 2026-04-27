@@ -159,6 +159,10 @@ input {
   pointer-events: auto;
 }
 
+#map.pan-active {
+  pointer-events: none !important;
+}
+
 .leaflet-control-zoom {
   display: none;
 }
@@ -272,9 +276,9 @@ input {
   position: absolute;
   z-index: 5;
   top: 66px;
-  left: 50%;
-  transform: translateX(-50%);
-  display: flex;
+  left: 18px;
+  transform: none;
+  display: grid;
   gap: 8px;
   padding: 8px;
   background: rgba(255, 255, 255, 0.92);
@@ -291,7 +295,7 @@ input {
   position: absolute;
   z-index: 6;
   right: 18px;
-  bottom: 58px;
+  bottom: 18px;
   display: grid;
   gap: 6px;
 }

@@ -476,6 +476,7 @@ function initBackgroundMap() {
   state.backgroundMap = background;
   map.classList.add("map-dimmed");
   setTool(state.tool);
+  setTimeout(() => background.invalidateSize(), 150);
 }
 
 function storageKey(name = state.watercourse) {
@@ -674,6 +675,8 @@ function setTool(tool) {
   document.querySelectorAll(".icon-button").forEach((button) => button.classList.remove("active"));
   document.querySelector(`#tool-${tool}`)?.classList.add("active");
   map.classList.toggle("drawing-active", tool !== "pan");
+  map.classList.toggle("pan-active", tool === "pan");
+  map.style.pointerEvents = tool === "pan" ? "none" : "auto";
   if (state.backgroundMap) {
     if (tool === "pan") {
       state.backgroundMap.dragging.enable();
