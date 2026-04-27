@@ -118,21 +118,8 @@
           <div class="project-meta">
             <label for="project-inventor">Utförare/inventerare</label>
             <input id="project-inventor" type="text" placeholder="Namn" />
-            <label for="project-machine">Maskinstorlek</label>
-            <select id="project-machine">
-              <option value="">Välj vid behov</option>
-              <option>Mindre</option>
-              <option>15-17</option>
-              <option>17-20</option>
-              <option>20-25</option>
-              <option>25-30</option>
-              <option>30-&gt;</option>
-            </select>
-            <label>Schaktmaskin</label>
-            <div class="choice-grid binary project-choice">
-              <button type="button" class="choice-button active" data-project-field="excavator" data-value="Nej">Nej</button>
-              <button type="button" class="choice-button" data-project-field="excavator" data-value="Ja">Ja</button>
-            </div>
+            <label>Datum</label>
+            <strong id="project-date-label">Dagens datum</strong>
             <details class="geo-settings">
               <summary>Koordinater</summary>
               <p>Koordinater följer automatiskt med för delsträckor, objekt och foton i exporten. Foton får telefonens GPS-position om GPS är på.</p>
@@ -154,16 +141,15 @@
             <div class="field-group">
               <label for="field-buffer-select">Buffert från vattendrag</label>
               <select id="field-buffer-select">
+                <option value="5">5 m</option>
+                <option value="10">10 m</option>
+                <option value="20">20 m</option>
+                <option value="30">30 m</option>
                 <option value="50">50 m</option>
                 <option value="100" selected>100 m</option>
-                <option value="250">250 m</option>
-                <option value="custom">Egen</option>
               </select>
             </div>
-            <div id="field-custom-buffer-wrap" class="field-group hidden">
-              <label for="field-custom-buffer">Egen buffert (m)</label>
-              <input id="field-custom-buffer" type="number" min="1" step="1" placeholder="Meter" />
-            </div>
+            <p class="status-hint">Steg 2: tryck Rita planerad str?cka och g?r punkter l?ngs vattendraget du t?nker kartera.</p>
             <div class="object-actions">
               <button id="draw-field-reach-button" class="secondary-button" type="button">Rita planerad sträcka</button>
               <button id="prepare-field-area-button" class="primary-button" type="button">Förbered område</button>

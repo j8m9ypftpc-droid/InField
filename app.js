@@ -158,6 +158,14 @@ const protocolGroups = [
   {
     title: "Åtgärder och beskrivning",
     fields: [
+      {
+        key: "maskinStorlek",
+        label: "Maskinstorlek",
+        type: "buttons",
+        options: ["Mindre", "15-17", "17-20", "20-25", "25-30", "30->"],
+        showIf: (a) => a.atgardsbehov === "Ja",
+      },
+      { key: "schaktmaskin", label: "Schaktmaskin", type: "binary", showIf: (a) => a.atgardsbehov === "Ja" },
       { key: "atgardsbehov", label: "Åtgärdsbehov", type: "binary" },
       { key: "atgarder", label: "Åtgärder", type: "textarea", showIf: (a) => a.atgardsbehov === "Ja" },
       { key: "beskrivning", label: "Beskriv sträckan", type: "textarea" },
@@ -269,7 +277,7 @@ const watercourseInput = document.querySelector("#watercourse-input");
 const openWatercourseButton = document.querySelector("#open-watercourse-button");
 const newWatercourseButton = document.querySelector("#new-watercourse-button");
 const projectInventor = document.querySelector("#project-inventor");
-const projectMachine = document.querySelector("#project-machine");
+const projectDateLabel = document.querySelector("#project-date-label");
 const saveStateLabel = document.querySelector("#save-state-label");
 const fieldStatusLabel = document.querySelector("#field-status-label");
 const fieldPackageName = document.querySelector("#field-package-name");
@@ -287,7 +295,7 @@ const skipFieldAreaButton = document.querySelector("#skip-field-area-button");
 
 state.watercourse = "Bresiljeån";
 state.selectedObjectId = null;
-state.projectMeta = { inventor: "", machineSize: "", excavator: "Nej" };
+state.projectMeta = { inventor: "" };
 
 function pathFromPoints(points) {
   return points.map((p, index) => `${index === 0 ? "M" : "L"}${p[0]},${p[1]}`).join(" ");
@@ -546,7 +554,7 @@ function centerOnGps() {
 }
 
 function defaultProjectMeta() {
-  return { inventor: "", machineSize: "", excavator: "Nej" };
+  return { inventor: "" };
 }
 
 function syncProjectMetaFromForm() {
@@ -554,13 +562,12 @@ function syncProjectMetaFromForm() {
     ...defaultProjectMeta(),
     ...(state.projectMeta ?? {}),
     inventor: projectInventor.value,
-    machineSize: projectMachine.value,
   };
 }
 
 function syncProjectMetaToForm() {
   projectInventor.value = state.projectMeta?.inventor ?? "";
-  projectMachine.value = state.projectMeta?.machineSize ?? "";
+  projectDateLabel.textContent = new Date().toISOString().slice(0, 10);
 }
 
 function makeSvg(name, attributes = {}) {
@@ -764,10 +771,6 @@ function deleteSavedProject(key) {
 }
 
 function syncProjectChoices() {
-  document.querySelectorAll("[data-project-field]").forEach((button) => {
-    const value = state.projectMeta?.[button.dataset.projectField] ?? "Nej";
-    button.classList.toggle("active", button.dataset.value === value);
-  });
 }
 
 function defaultProtocolAttributes() {
@@ -1881,8 +1884,6 @@ async function exportGeoJson(projectPayload = null) {
       lager: "delstrackor",
       vattendrag: exportState.watercourse,
       inventor: exportState.projectMeta?.inventor ?? "",
-      maskin: exportState.projectMeta?.machineSize ?? "",
-      schaktmaskin: exportState.projectMeta?.excavator ?? "Nej",
       stracka_nr: section.number,
       length: formatLength(section.points),
       koordinater: coordinateSystem,
@@ -1900,8 +1901,6 @@ async function exportGeoJson(projectPayload = null) {
       lager: object.geometry.type === "Point" ? "punktobjekt" : object.geometry.type === "LineString" ? "linjeobjekt" : "ytobjekt",
       vattendrag: exportState.watercourse,
       inventor: exportState.projectMeta?.inventor ?? "",
-      maskin: exportState.projectMeta?.machineSize ?? "",
-      schaktmaskin: exportState.projectMeta?.excavator ?? "Nej",
       section_id: object.sectionId,
       stracka_nr: section?.number ?? null,
       objekttyp: object.typeLabel,
@@ -1963,8 +1962,7 @@ async function exportGeoJson(projectPayload = null) {
     vattendrag: exportState.watercourse,
     exporterad: new Date().toISOString(),
     inventor: exportState.projectMeta?.inventor ?? "",
-    maskin: exportState.projectMeta?.machineSize ?? "",
-    schaktmaskin: exportState.projectMeta?.excavator ?? "Nej",
+    datum: new Date().toISOString().slice(0, 10),
     koordinater: coordinateSystem,
     stodlinje: state.useSupportLine ? "tillfallig" : "ingen",
     delstrackor: sectionFeatures.length,
@@ -2229,14 +2227,6 @@ cancelObjectEditButton.addEventListener("click", () => {
 openWatercourseButton.addEventListener("click", () => openWatercourse(watercourseInput.value));
 newWatercourseButton.addEventListener("click", newWatercourse);
 projectInventor.addEventListener("input", saveProject);
-projectMachine.addEventListener("change", saveProject);
-document.querySelectorAll("[data-project-field]").forEach((button) => {
-  button.addEventListener("click", () => {
-    state.projectMeta[button.dataset.projectField] = button.dataset.value;
-    syncProjectChoices();
-    saveProject();
-  });
-});
 watercourseInput.addEventListener("keydown", (event) => {
   if (event.key === "Enter") openWatercourse(watercourseInput.value);
 });
