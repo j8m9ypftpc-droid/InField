@@ -227,6 +227,8 @@ const state = {
   mappingStarted: false,
   tool: "pan",
   lastObjectTool: "point",
+  lastExport: null,
+  objectEditDraft: null,
   tempObject: null,
   dragging: null,
   gpsEnabled: false,
@@ -302,6 +304,10 @@ const fieldStepPanel = document.querySelector("#field-step-panel");
 const mappingWorkspace = document.querySelector("#mapping-workspace");
 const startMappingButton = document.querySelector("#start-mapping-button");
 const skipFieldAreaButton = document.querySelector("#skip-field-area-button");
+const exportDialog = document.querySelector("#export-dialog");
+const exportStatusText = document.querySelector("#export-status-text");
+const exportShareButton = document.querySelector("#export-share-button");
+const exportDownloadButton = document.querySelector("#export-download-button");
 
 state.watercourse = "Bresiljeån";
 state.selectedObjectId = null;
@@ -686,7 +692,8 @@ function switchProject() {
   startScreen.classList.remove("hidden");
 }
 
-function saveProject() {
+function saveProject(options = {}) {
+  if (options.syncProtocol !== false) syncFormToProtocol({ save: false });
   syncProjectMetaFromForm();
   state.nextSectionNumber = nextSectionNumber();
   const payload = {
@@ -1025,6 +1032,7 @@ function selectObject(id) {
   const currentSection = currentSectionForObjects();
   if (currentSection && object.sectionId !== currentSection.id) return;
   state.selectedObjectId = id;
+  state.objectEditDraft = { id, typeLabel: object.typeLabel, comment: object.comment ?? "" };
   updateObjectTypeSelect(objectGeometryTool(object), object.typeLabel);
   objectType.value = object.typeLabel;
   objectComment.value = object.comment ?? "";
@@ -1036,6 +1044,7 @@ function selectObject(id) {
 
 function clearSelectedObject() {
   state.selectedObjectId = null;
+  state.objectEditDraft = null;
   saveObjectButton.disabled = true;
   cancelObjectEditButton.disabled = true;
   addObjectPhotoButton.disabled = true;
@@ -1056,8 +1065,8 @@ function saveInlineObject(id) {
   if (!object) return;
   const typeField = document.querySelector(`[data-inline-object-type="${id}"]`);
   const commentField = document.querySelector(`[data-inline-object-comment="${id}"]`);
-  object.typeLabel = typeField.value;
-  object.comment = commentField.value;
+  object.typeLabel = state.objectEditDraft?.id === id ? state.objectEditDraft.typeLabel : typeField.value;
+  object.comment = state.objectEditDraft?.id === id ? state.objectEditDraft.comment : commentField.value;
   objectType.value = object.typeLabel;
   objectComment.value = object.comment;
   clearSelectedObject();
@@ -1105,13 +1114,13 @@ function objectTypeOptions(tool, selected) {
     .join("");
 }
 
-function syncFormToProtocol() {
+function syncFormToProtocol(options = {}) {
   if (!state.activeSection) return;
   document.querySelectorAll("[data-protocol-input]").forEach((input) => {
     state.activeSection.attributes[input.dataset.protocolInput] = input.value;
   });
   updateCalculatedProtocolFields();
-  saveProject();
+  if (options.save !== false) saveProject({ syncProtocol: false });
 }
 
 function syncProtocolToForm() {
@@ -1506,6 +1515,9 @@ function renderObjects() {
 }
 
 function renderLists() {
+  const activeTag = document.activeElement?.tagName;
+  const editingInline = document.activeElement?.closest?.(".inline-editor");
+  if (editingInline && ["TEXTAREA", "SELECT", "INPUT"].includes(activeTag)) return;
   renderSectionPhotos();
   sectionList.innerHTML = "";
   [...state.sections]
@@ -1528,6 +1540,7 @@ function renderLists() {
     const li = document.createElement("li");
     const isSelected = state.selectedObjectId === object.id;
     li.className = isSelected ? "selected" : "";
+    const draft = state.objectEditDraft?.id === object.id ? state.objectEditDraft : object;
     const geometryLabel =
       object.geometry.type === "Point"
         ? "Punkt"
@@ -1535,7 +1548,7 @@ function renderLists() {
           ? "Linje"
           : "Yta";
     li.innerHTML = isSelected
-      ? `<strong>${object.typeLabel}</strong><span>${geometryLabel} · Sträcka ${section?.number ?? "-"}</span><div class="inline-editor"><label>Objekttyp</label><select data-inline-object-type="${object.id}">${objectTypeOptions(objectGeometryTool(object), object.typeLabel)}</select><label>Kommentar</label><textarea rows="3" data-inline-object-comment="${object.id}">${object.comment || ""}</textarea></div>${objectPhotoMarkup(object.id)}<div class="list-actions"><button class="secondary-button" data-save-object="${object.id}">Spara</button><button class="quiet-button" data-cancel-object="${object.id}">Avbryt</button><button class="danger-button" data-delete-object="${object.id}">Ta bort</button></div>`
+      ? `<strong>${draft.typeLabel}</strong><span>${geometryLabel} · Sträcka ${section?.number ?? "-"}</span><div class="inline-editor"><label>Objekttyp</label><select data-inline-object-type="${object.id}">${objectTypeOptions(objectGeometryTool(object), draft.typeLabel)}</select><label>Kommentar</label><textarea rows="3" data-inline-object-comment="${object.id}">${draft.comment || ""}</textarea></div>${objectPhotoMarkup(object.id)}<div class="list-actions"><button class="secondary-button" data-save-object="${object.id}">Spara</button><button class="quiet-button" data-cancel-object="${object.id}">Avbryt</button><button class="danger-button" data-delete-object="${object.id}">Ta bort</button></div>`
       : `<strong>${object.typeLabel}</strong><span>${geometryLabel} · Sträcka ${section?.number ?? "-"} · ${object.comment || "Ingen kommentar"}</span><div class="list-actions"><button class="quiet-button" data-edit-object="${object.id}">Ändra</button><button class="danger-button" data-delete-object="${object.id}">Ta bort</button></div>`;
     objectList.append(li);
   });
@@ -2001,8 +2014,7 @@ async function exportGeoJson(projectPayload = null) {
     foton: photoMetadata.length,
   };
   if (window.JSZip) {
-    await downloadZipPackage(safeName, exportState, layers, metadata, photoMetadata);
-    openExportMail(exportState.watercourse, `${safeName}-gis-export.zip`);
+    await createZipExport(safeName, exportState, layers, metadata, photoMetadata);
     return;
   }
   layers.forEach(([name, features], index) => {
@@ -2033,7 +2045,7 @@ function safeFilename(name) {
     .replace(/^-|-$/g, "") || "infield";
 }
 
-async function downloadZipPackage(safeName, exportState, layers, metadata, photoMetadata) {
+async function createZipExport(safeName, exportState, layers, metadata, photoMetadata) {
   const zip = new JSZip();
   const gisFolder = zip.folder("gis");
   const photoFolder = zip.folder("foton");
@@ -2049,7 +2061,40 @@ async function downloadZipPackage(safeName, exportState, layers, metadata, photo
     photoFolder.file(filename, dataUrlBase64(photo.dataUrl), { base64: true });
   });
   const blob = await zip.generateAsync({ type: "blob", compression: "DEFLATE", compressionOptions: { level: 6 } });
-  downloadBlob(`${safeName}-gis-export.zip`, blob);
+  const filename = `${safeName}-gis-export.zip`;
+  state.lastExport = { filename, blob, watercourse: exportState.watercourse };
+  await shareOrShowExport(filename, blob, exportState.watercourse);
+}
+
+async function shareOrShowExport(filename, blob, watercourse) {
+  const file = new File([blob], filename, { type: "application/zip" });
+  const canShareFile = Boolean(navigator.canShare?.({ files: [file] }));
+  if (canShareFile) {
+    try {
+      await navigator.share({
+        title: `InField export ${watercourse}`,
+        text: `GIS-export från InField: ${watercourse}`,
+        files: [file],
+      });
+      showExportDialog(`Exportpaketet är delat: ${filename}`);
+      return;
+    } catch (error) {
+      if (error?.name === "AbortError") {
+        showExportDialog(`Exportpaketet är klart: ${filename}`);
+        return;
+      }
+    }
+  }
+  downloadBlob(filename, blob);
+  showExportDialog(`Zipfilen är skapad och nedladdad: ${filename}. Om du vill maila den, bifoga filen manuellt från Hämtade filer/Filer.`);
+}
+
+function showExportDialog(message) {
+  exportStatusText.textContent = message;
+  exportShareButton.disabled = !state.lastExport || !navigator.canShare?.({
+    files: [new File([state.lastExport.blob], state.lastExport.filename, { type: "application/zip" })],
+  });
+  exportDialog.showModal();
 }
 
 function photoExtension(photo) {
@@ -2211,6 +2256,15 @@ startStopButton.addEventListener("click", () => {
 });
 
 document.querySelector("#export-button").addEventListener("click", exportGeoJson);
+exportShareButton.addEventListener("click", async () => {
+  if (!state.lastExport) return;
+  await shareOrShowExport(state.lastExport.filename, state.lastExport.blob, state.lastExport.watercourse);
+});
+exportDownloadButton.addEventListener("click", () => {
+  if (!state.lastExport) return;
+  downloadBlob(state.lastExport.filename, state.lastExport.blob);
+  exportStatusText.textContent = `Zipfilen laddades ner igen: ${state.lastExport.filename}`;
+});
 splashCover.addEventListener("click", showProjectPicker);
 gpsToggleButton.addEventListener("click", toggleGps);
 centerGpsButton.addEventListener("click", centerOnGps);
@@ -2274,6 +2328,10 @@ sectionList.addEventListener("click", (event) => {
   if (deleteId) deleteSection(deleteId);
 });
 objectList.addEventListener("click", (event) => {
+  if (event.target.closest(".inline-editor")) {
+    event.stopPropagation();
+    return;
+  }
   const editId = event.target.dataset.editObject;
   const saveId = event.target.dataset.saveObject;
   const cancelId = event.target.dataset.cancelObject;
@@ -2286,8 +2344,35 @@ objectList.addEventListener("click", (event) => {
   }
   if (deleteId) deleteObject(deleteId);
 });
+["pointerdown", "touchstart", "mousedown"].forEach((eventName) => {
+  objectList.addEventListener(eventName, (event) => {
+    if (event.target.closest(".inline-editor")) event.stopPropagation();
+  });
+});
+objectList.addEventListener("input", (event) => {
+  const commentId = event.target.dataset.inlineObjectComment;
+  if (!commentId) return;
+  if (!state.objectEditDraft || state.objectEditDraft.id !== commentId) {
+    const object = state.objects.find((item) => item.id === commentId);
+    state.objectEditDraft = { id: commentId, typeLabel: object?.typeLabel ?? objectType.value, comment: "" };
+  }
+  state.objectEditDraft.comment = event.target.value;
+});
+objectList.addEventListener("change", (event) => {
+  const typeId = event.target.dataset.inlineObjectType;
+  if (!typeId) return;
+  if (!state.objectEditDraft || state.objectEditDraft.id !== typeId) {
+    const object = state.objects.find((item) => item.id === typeId);
+    state.objectEditDraft = { id: typeId, typeLabel: object?.typeLabel ?? event.target.value, comment: object?.comment ?? "" };
+  }
+  state.objectEditDraft.typeLabel = event.target.value;
+});
 map.addEventListener("click", handleMapClick);
 map.addEventListener("pointerdown", startDrag);
 map.addEventListener("pointermove", moveDrag);
 window.addEventListener("pointerup", endDrag);
+window.addEventListener("beforeunload", () => saveProject());
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") saveProject();
+});
 

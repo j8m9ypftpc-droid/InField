@@ -782,6 +782,27 @@ select,
   display: block;
 }
 
+.export-dialog {
+  width: min(420px, calc(100vw - 28px));
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 18px;
+  color: var(--ink);
+}
+
+.export-dialog::backdrop {
+  background: rgba(23, 33, 28, 0.35);
+}
+
+.export-dialog h2 {
+  margin: 0 0 8px;
+}
+
+.export-dialog p {
+  color: var(--muted);
+  line-height: 1.4;
+}
+
 .hidden {
   display: none !important;
 }
