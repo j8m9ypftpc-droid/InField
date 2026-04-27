@@ -171,14 +171,14 @@
                 <button id="use-reference-line-button" class="quiet-button" type="button" disabled>Använd vald linje</button>
               </div>
               <details class="token-settings">
-                <summary>Lantmäteriet-token (valfri)</summary>
+                <summary>Lantmäteriet-behörighet</summary>
                 <div class="token-grid">
-                  <input id="lantmateriet-token-input" type="password" autocomplete="off" placeholder="Klistra in token här" />
+                  <input id="lantmateriet-token-input" type="password" autocomplete="off" placeholder="Token eller användare:lösenord" />
                   <button id="save-lantmateriet-token-button" class="secondary-button" type="button">Spara</button>
                   <button id="test-lantmateriet-token-button" class="quiet-button" type="button">Testa</button>
                   <button id="clear-lantmateriet-token-button" class="quiet-button" type="button">Rensa</button>
                 </div>
-                <p class="status-hint">Lämna tom om tjänsten svarar utan token. Om token behövs sparas den bara lokalt i webbläsaren.</p>
+                <p class="status-hint">Själva linjerna kräver behörighet. Spara inget här som du inte vill ha lokalt på enheten.</p>
               </details>
               <input id="reference-line-input" type="file" accept=".geojson,.json,.kml,application/geo+json,application/json,application/vnd.google-earth.kml+xml" hidden />
               <p id="reference-line-status" class="status-hint">Ingen stödlinje importerad.</p>

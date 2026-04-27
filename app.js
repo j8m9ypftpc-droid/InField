@@ -2006,17 +2006,17 @@ function syncLantmaterietTokenInput() {
 function saveLantmaterietToken() {
   const token = lantmaterietTokenInput?.value.trim() ?? "";
   if (!token) {
-    referenceLineStatus.textContent = "Klistra in token först.";
+    referenceLineStatus.textContent = "Klistra in token, API-nyckel eller användare:lösenord först.";
     return;
   }
   localStorage.setItem(LANTMATERIET_TOKEN_KEY, token);
-  referenceLineStatus.textContent = "Lantmäteriet-token sparad lokalt.";
+  referenceLineStatus.textContent = "Lantmäteriet-behörighet sparad lokalt.";
 }
 
 function clearLantmaterietToken() {
   localStorage.removeItem(LANTMATERIET_TOKEN_KEY);
   if (lantmaterietTokenInput) lantmaterietTokenInput.value = "";
-  referenceLineStatus.textContent = "Lantmäteriet-token rensad från webbläsaren.";
+  referenceLineStatus.textContent = "Lantmäteriet-behörighet rensad från webbläsaren.";
 }
 
 function mapBoundsParams(limit = 1000) {
@@ -2036,13 +2036,19 @@ function mapBoundsParams(limit = 1000) {
 async function fetchLantmaterietJson(params, token) {
   const url = `${LANTMATERIET_WATERCOURSE_URL}?${params.toString()}`;
   if (!token) {
-    const response = await fetch(url);
-    if (!response.ok) throw new Error("Lantmäteriet svarade inte.");
+    const response = await fetch(url, {
+      headers: { Accept: "application/geo+json, application/json" },
+    });
+    if (!response.ok) throw new Error(`Lantmäteriet svarade ${response.status}. Själva linjerna kräver behörighet.`);
     return response.json();
   }
+  const authorization = token.includes(":") ? `Basic ${btoa(token)}` : `Bearer ${token}`;
   try {
     const response = await fetch(url, {
-      headers: { Authorization: `Bearer ${token}` },
+      headers: {
+        Accept: "application/geo+json, application/json",
+        Authorization: authorization,
+      },
     });
     if (response.ok) return response.json();
   } catch (error) {
@@ -2051,7 +2057,7 @@ async function fetchLantmaterietJson(params, token) {
   const tokenParams = new URLSearchParams(params);
   tokenParams.set("access_token", token);
   const fallbackResponse = await fetch(`${LANTMATERIET_WATERCOURSE_URL}?${tokenParams.toString()}`);
-  if (!fallbackResponse.ok) throw new Error("Lantmäteriet svarade inte.");
+  if (!fallbackResponse.ok) throw new Error(`Lantmäteriet svarade ${fallbackResponse.status}. Kontrollera behörigheten.`);
   return fallbackResponse.json();
 }
 
@@ -2059,6 +2065,10 @@ async function fetchLantmaterietWaterwaysInView(testOnly = false) {
   if (!state.backgroundMap) return;
   const token = (lantmaterietTokenInput?.value.trim() || savedLantmaterietToken()).trim();
   if (lantmaterietTokenInput?.value.trim()) localStorage.setItem(LANTMATERIET_TOKEN_KEY, token);
+  if (!token && !testOnly) {
+    referenceLineStatus.textContent = "Själva vattendragslinjerna kräver behörighet. Lägg in token eller användare:lösenord under Lantmäteriet-behörighet.";
+    return;
+  }
 
   const { params, span } = mapBoundsParams(testOnly ? 1 : 1000);
   if (!testOnly && span > 0.25 && !window.confirm("Kartvyn är ganska stor. Zooma helst in på din arbetsplats. Vill du hämta ändå?")) return;
@@ -2076,7 +2086,7 @@ async function fetchLantmaterietWaterwaysInView(testOnly = false) {
       referenceLineStatus.textContent = `${lines.length} Lantmäteriet-linjer hämtade. Zooma in mer om du vill minska urvalet.`;
     }
   } catch (error) {
-    referenceLineStatus.textContent = "Kunde inte hämta från Lantmäteriet. Kontrollera token och zooma in till en mindre kartvy.";
+    referenceLineStatus.textContent = error.message || "Kunde inte hämta från Lantmäteriet. Kontrollera behörigheten och zooma in till en mindre kartvy.";
   }
 }
 
