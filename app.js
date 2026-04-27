@@ -19,6 +19,7 @@
 const LANTMATERIET_TOKEN_KEY = "infield:lantmateriet-token";
 const BASEMAP_KEY = "infield:basemap";
 const THEME_KEY = "infield:theme";
+const LAYOUT_MODE_KEY = "infield:layout-mode";
 const LANTMATERIET_WATERCOURSE_URL =
   "https://api.lantmateriet.se/ogc-features/v1/hydrografi/collections/WatercourseLine/items";
 const LANTMATERIET_ATTRIBUTION = "Hydrografi Direkt © Lantmäteriet, bearbetad, CC BY 4.0";
@@ -284,6 +285,8 @@ const mapZoomInButton = document.querySelector("#map-zoom-in");
 const mapZoomOutButton = document.querySelector("#map-zoom-out");
 const basemapSelect = document.querySelector("#basemap-select");
 const themeToggleButton = document.querySelector("#theme-toggle-button");
+const layoutStandardButton = document.querySelector("#layout-standard-button");
+const layoutTabletButton = document.querySelector("#layout-tablet-button");
 const startScreen = document.querySelector("#start-screen");
 const splashCover = document.querySelector("#splash-cover");
 const projectList = document.querySelector("#project-list");
@@ -727,6 +730,14 @@ function setTheme(theme = localStorage.getItem(THEME_KEY) ?? "dark") {
     themeToggleButton.setAttribute("aria-pressed", String(nextTheme === "dark"));
   }
   setBaseMap(basemapSelect?.value ?? localStorage.getItem(BASEMAP_KEY) ?? "osm");
+}
+
+function setLayoutMode(mode = localStorage.getItem(LAYOUT_MODE_KEY) ?? "standard") {
+  const nextMode = mode === "tablet" ? "tablet" : "standard";
+  document.documentElement.dataset.layoutMode = nextMode;
+  localStorage.setItem(LAYOUT_MODE_KEY, nextMode);
+  layoutStandardButton?.setAttribute("aria-pressed", String(nextMode === "standard"));
+  layoutTabletButton?.setAttribute("aria-pressed", String(nextMode === "tablet"));
 }
 
 function initBackgroundMap() {
@@ -2771,6 +2782,7 @@ supportLine.setAttribute("d", pathFromPoints(supportPoints));
 supportLine.classList.toggle("hidden", !state.useSupportLine);
 initBackgroundMap();
 setTheme(localStorage.getItem(THEME_KEY) ?? "dark");
+setLayoutMode(localStorage.getItem(LAYOUT_MODE_KEY) ?? "standard");
 renderProtocolFields();
 updateObjectTypeSelect("point", "Bestämmande sektion");
 syncLantmaterietTokenInput();
@@ -2806,6 +2818,8 @@ themeToggleButton?.addEventListener("click", () => {
   const isDark = document.documentElement.dataset.theme === "dark";
   setTheme(isDark ? "light" : "dark");
 });
+layoutStandardButton?.addEventListener("click", () => setLayoutMode("standard"));
+layoutTabletButton?.addEventListener("click", () => setLayoutMode("tablet"));
 
 document.querySelectorAll("[data-object-tool]").forEach((button) => {
   button.addEventListener("click", () => {
