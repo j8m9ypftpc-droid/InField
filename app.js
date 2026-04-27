@@ -219,6 +219,8 @@ const state = {
 const map = document.querySelector("#map");
 const mapToolbar = document.querySelector("#map-toolbar");
 const toolMenuButton = document.querySelector("#tool-menu-button");
+const mapZoomInButton = document.querySelector("#map-zoom-in");
+const mapZoomOutButton = document.querySelector("#map-zoom-out");
 const startScreen = document.querySelector("#start-screen");
 const splashCover = document.querySelector("#splash-cover");
 const projectList = document.querySelector("#project-list");
@@ -470,10 +472,10 @@ function initBackgroundMap() {
     maxZoom: 19,
     attribution: "&copy; OpenStreetMap contributors",
   }).addTo(background);
-  window.L.control.zoom({ position: "bottomright" }).addTo(background);
   background.on("move zoom", renderGps);
   state.backgroundMap = background;
   map.classList.add("map-dimmed");
+  setTool(state.tool);
 }
 
 function storageKey(name = state.watercourse) {
@@ -672,6 +674,19 @@ function setTool(tool) {
   document.querySelectorAll(".icon-button").forEach((button) => button.classList.remove("active"));
   document.querySelector(`#tool-${tool}`)?.classList.add("active");
   map.classList.toggle("drawing-active", tool !== "pan");
+  if (state.backgroundMap) {
+    if (tool === "pan") {
+      state.backgroundMap.dragging.enable();
+      state.backgroundMap.touchZoom.enable();
+      state.backgroundMap.doubleClickZoom.enable();
+      state.backgroundMap.scrollWheelZoom.enable();
+    } else {
+      state.backgroundMap.dragging.disable();
+      state.backgroundMap.touchZoom.disable();
+      state.backgroundMap.doubleClickZoom.disable();
+      state.backgroundMap.scrollWheelZoom.disable();
+    }
+  }
   mapToolbar.classList.add("collapsed");
   toolMenuButton.setAttribute("aria-expanded", "false");
   mapHint.textContent =
@@ -1590,6 +1605,8 @@ toolMenuButton.addEventListener("click", () => {
   const collapsed = mapToolbar.classList.toggle("collapsed");
   toolMenuButton.setAttribute("aria-expanded", String(!collapsed));
 });
+mapZoomInButton.addEventListener("click", () => state.backgroundMap?.zoomIn());
+mapZoomOutButton.addEventListener("click", () => state.backgroundMap?.zoomOut());
 
 document.querySelectorAll("[data-object-tool]").forEach((button) => {
   button.addEventListener("click", () => setTool(button.dataset.objectTool));
