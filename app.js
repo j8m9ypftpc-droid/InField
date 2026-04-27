@@ -205,6 +205,8 @@ const state = {
   sections: [],
   objects: [],
   photos: [],
+  fieldPackages: [],
+  draftFieldReach: [],
   tool: "pan",
   tempObject: null,
   dragging: null,
@@ -230,6 +232,7 @@ const startWatercourseInput = document.querySelector("#start-watercourse-input")
 const startNewButton = document.querySelector("#start-new-button");
 const supportLine = document.querySelector("#support-line");
 const mapPhotoInput = document.querySelector("#map-photo-input");
+const fieldLayer = document.querySelector("#field-layer");
 const sectionsLayer = document.querySelector("#sections-layer");
 const gpsLayer = document.querySelector("#gps-layer");
 const verticesLayer = document.querySelector("#vertices-layer");
@@ -267,6 +270,15 @@ const newWatercourseButton = document.querySelector("#new-watercourse-button");
 const projectInventor = document.querySelector("#project-inventor");
 const projectMachine = document.querySelector("#project-machine");
 const saveStateLabel = document.querySelector("#save-state-label");
+const fieldStatusLabel = document.querySelector("#field-status-label");
+const fieldPackageName = document.querySelector("#field-package-name");
+const fieldBufferSelect = document.querySelector("#field-buffer-select");
+const fieldCustomBufferWrap = document.querySelector("#field-custom-buffer-wrap");
+const fieldCustomBuffer = document.querySelector("#field-custom-buffer");
+const drawFieldReachButton = document.querySelector("#draw-field-reach-button");
+const prepareFieldAreaButton = document.querySelector("#prepare-field-area-button");
+const clearFieldAreaButton = document.querySelector("#clear-field-area-button");
+const fieldPackageList = document.querySelector("#field-package-list");
 
 state.watercourse = "Bresiljeån";
 state.selectedObjectId = null;
@@ -556,6 +568,7 @@ function saveProject() {
     sections: state.sections,
     objects: state.objects,
     photos: state.photos,
+    fieldPackages: state.fieldPackages,
     projectMeta: state.projectMeta,
     savedAt: new Date().toISOString(),
   };
@@ -590,6 +603,8 @@ function openWatercourse(name, saveCurrent = true) {
     state.sections = (payload.sections ?? []).map(normalizeSectionAttributes);
     state.objects = payload.objects ?? [];
     state.photos = payload.photos ?? [];
+    state.fieldPackages = payload.fieldPackages ?? [];
+    state.draftFieldReach = [];
     state.projectMeta = { ...defaultProjectMeta(), ...(payload.projectMeta ?? {}) };
     syncProjectMetaToForm();
     syncProjectChoices();
@@ -600,6 +615,8 @@ function openWatercourse(name, saveCurrent = true) {
     state.sections = [];
     state.objects = [];
     state.photos = [];
+    state.fieldPackages = [];
+    state.draftFieldReach = [];
     state.projectMeta = defaultProjectMeta();
     syncProjectMetaToForm();
     syncProjectChoices();
@@ -695,6 +712,8 @@ function setTool(tool) {
   mapHint.textContent =
     tool === "pan"
       ? "Flytta och zooma kartan."
+      : tool === "field"
+      ? "Klicka start och stopp för planerad fältsträcka."
       : tool === "section"
       ? "Välj grön startpunkt och röd stoppunkt i kartan."
       : tool === "photo"
@@ -1074,6 +1093,39 @@ function renderSections() {
   });
 }
 
+function renderFieldPackages() {
+  fieldLayer.innerHTML = "";
+  state.fieldPackages.forEach((fieldPackage) => {
+    if (fieldPackage.fieldArea?.length) {
+      fieldLayer.append(
+        makeSvg("path", {
+          d: `${pathFromPoints(fieldPackage.fieldArea)} Z`,
+          class: "field-area",
+        }),
+      );
+    }
+    if (fieldPackage.plannedReach?.length > 1) {
+      fieldLayer.append(
+        makeSvg("path", {
+          d: pathFromPoints(fieldPackage.plannedReach),
+          class: "field-reach",
+        }),
+      );
+    }
+  });
+  if (state.draftFieldReach.length) {
+    fieldLayer.append(
+      makeSvg("path", {
+        d: pathFromPoints(state.draftFieldReach),
+        class: "field-reach",
+      }),
+    );
+    state.draftFieldReach.forEach((point) => {
+      fieldLayer.append(makeSvg("circle", { cx: point[0], cy: point[1], r: 8, class: "vertex" }));
+    });
+  }
+}
+
 function renderVertices() {
   verticesLayer.innerHTML = "";
   if (!state.activeSection) return;
@@ -1177,6 +1229,23 @@ function renderLists() {
       : `<strong>${object.typeLabel}</strong><span>${geometryLabel} · Sträcka ${section?.number ?? "-"} · ${object.comment || "Ingen kommentar"}</span><div class="list-actions"><button class="quiet-button" data-edit-object="${object.id}">Ändra</button><button class="danger-button" data-delete-object="${object.id}">Ta bort</button></div>`;
     objectList.append(li);
   });
+
+  fieldPackageList.innerHTML = "";
+  fieldStatusLabel.textContent = state.draftFieldReach.length
+    ? state.draftFieldReach.length > 1
+      ? "Ej sparat"
+      : "Ritar planerad sträcka"
+    : state.fieldPackages.length
+      ? "Sparat lokalt"
+      : "Ej förberett";
+  state.fieldPackages
+    .slice()
+    .reverse()
+    .forEach((fieldPackage) => {
+      const li = document.createElement("li");
+      li.innerHTML = `<strong>${fieldPackage.name}</strong><span>${fieldPackage.bufferMeters} m buffert · ${fieldPackage.statusLabel ?? "Sparat lokalt"}</span>`;
+      fieldPackageList.append(li);
+    });
 }
 
 function renderSectionPhotos() {
@@ -1246,6 +1315,7 @@ function renderStatus() {
 }
 
 function render() {
+  renderFieldPackages();
   renderSections();
   renderGps();
   renderVertices();
@@ -1345,6 +1415,83 @@ function closeRing(points) {
   return [...points, first];
 }
 
+function bufferReach(points, bufferMeters) {
+  if (!points?.length) return [];
+  if (points.length === 1) {
+    const radius = bufferMeters / 1.8;
+    const [x, y] = points[0];
+    return [
+      [x - radius, y - radius],
+      [x + radius, y - radius],
+      [x + radius, y + radius],
+      [x - radius, y + radius],
+      [x - radius, y - radius],
+    ];
+  }
+  const start = points[0];
+  const stop = points.at(-1);
+  const dx = stop[0] - start[0];
+  const dy = stop[1] - start[1];
+  const len = Math.hypot(dx, dy) || 1;
+  const offset = bufferMeters / 1.8;
+  const ox = (-dy / len) * offset;
+  const oy = (dx / len) * offset;
+  return [
+    [start[0] + ox, start[1] + oy],
+    [stop[0] + ox, stop[1] + oy],
+    [stop[0] - ox, stop[1] - oy],
+    [start[0] - ox, start[1] - oy],
+    [start[0] + ox, start[1] + oy],
+  ];
+}
+
+function fieldBufferMeters() {
+  if (fieldBufferSelect.value === "custom") {
+    const custom = Number(fieldCustomBuffer.value);
+    return Number.isFinite(custom) && custom > 0 ? custom : 100;
+  }
+  return Number(fieldBufferSelect.value) || 100;
+}
+
+function prepareFieldArea() {
+  if (state.draftFieldReach.length < 2) {
+    fieldStatusLabel.textContent = "Ofullständigt";
+    mapHint.textContent = "Rita planerad fältsträcka först.";
+    sideMapHint.textContent = mapHint.textContent;
+    return;
+  }
+  fieldStatusLabel.textContent = "Förbereder";
+  const bufferMeters = fieldBufferMeters();
+  const fieldArea = bufferReach(state.draftFieldReach, bufferMeters);
+  const name = fieldPackageName.value.trim() || `Fältområde ${state.fieldPackages.length + 1}`;
+  state.fieldPackages.push({
+    id: crypto.randomUUID(),
+    name,
+    status: "Ready for offline fieldwork",
+    statusLabel: "Sparat lokalt",
+    plannedReach: [...state.draftFieldReach],
+    bufferMeters,
+    fieldArea,
+    createdAt: new Date().toISOString(),
+    offline: {
+      basemapReady: false,
+      referenceLayersReady: false,
+    },
+  });
+  state.draftFieldReach = [];
+  fieldStatusLabel.textContent = "Sparat lokalt";
+  saveProject();
+  setTool("pan");
+  render();
+}
+
+function clearFieldAreaDraft() {
+  state.draftFieldReach = [];
+  fieldStatusLabel.textContent = state.fieldPackages.length ? "Sparat lokalt" : "Ej förberett";
+  saveProject();
+  render();
+}
+
 function pointSummary(points) {
   if (!points?.length) return {};
   const start = pointToGeo(points[0]);
@@ -1376,6 +1523,7 @@ async function exportGeoJson(projectPayload = null) {
         activeSection: projectPayload.activeSection ?? null,
         objects: projectPayload.objects ?? [],
         photos: projectPayload.photos ?? [],
+        fieldPackages: projectPayload.fieldPackages ?? [],
       }
     : state;
   const coordinateSystem = "WGS84 lon/lat (EPSG:4326) från kartans nuvarande position";
@@ -1420,6 +1568,32 @@ async function exportGeoJson(projectPayload = null) {
     geometry: geometryToGeo(object.geometry),
     };
   });
+  const fieldPackageFeatures = (exportState.fieldPackages ?? []).flatMap((fieldPackage) => [
+    {
+      type: "Feature",
+      properties: {
+        id: fieldPackage.id,
+        lager: "faltomrade",
+        vattendrag: exportState.watercourse,
+        namn: fieldPackage.name,
+        status: fieldPackage.statusLabel ?? fieldPackage.status,
+        buffer_m: fieldPackage.bufferMeters,
+        skapad: fieldPackage.createdAt,
+      },
+      geometry: geometryToGeo({ type: "Polygon", coordinates: [fieldPackage.fieldArea ?? []] }),
+    },
+    {
+      type: "Feature",
+      properties: {
+        id: `${fieldPackage.id}-reach`,
+        lager: "planerad_stracka",
+        vattendrag: exportState.watercourse,
+        namn: fieldPackage.name,
+        buffer_m: fieldPackage.bufferMeters,
+      },
+      geometry: geometryToGeo({ type: "LineString", coordinates: fieldPackage.plannedReach ?? [] }),
+    },
+  ]);
   const photoMetadata = (exportState.photos ?? []).map((photo) => ({
     id: photo.id,
     vattendrag: exportState.watercourse,
@@ -1439,6 +1613,7 @@ async function exportGeoJson(projectPayload = null) {
     ["punktobjekt", objectFeatures.filter((feature) => feature.geometry.type === "Point")],
     ["linjeobjekt", objectFeatures.filter((feature) => feature.geometry.type === "LineString")],
     ["ytobjekt", objectFeatures.filter((feature) => feature.geometry.type === "Polygon")],
+    ["faltomraden", fieldPackageFeatures],
   ];
   const metadata = {
     vattendrag: exportState.watercourse,
@@ -1452,6 +1627,7 @@ async function exportGeoJson(projectPayload = null) {
     punktobjekt: layers[1][1].length,
     linjeobjekt: layers[2][1].length,
     ytobjekt: layers[3][1].length,
+    faltomraden: exportState.fieldPackages?.length ?? 0,
     foton: photoMetadata.length,
   };
   if (window.JSZip) {
@@ -1560,6 +1736,9 @@ function handleMapClick(event) {
     addObjectPoint(point);
   } else if (state.tool === "photo") {
     triggerMapPhoto();
+  } else if (state.tool === "field") {
+    state.draftFieldReach = state.draftFieldReach.length ? [state.draftFieldReach[0], point] : [point];
+    if (state.draftFieldReach.length === 2) fieldStatusLabel.textContent = "Ej sparat";
   } else {
     addObjectVertex(point);
   }
@@ -1613,6 +1792,17 @@ mapZoomOutButton.addEventListener("click", () => state.backgroundMap?.zoomOut())
 
 document.querySelectorAll("[data-object-tool]").forEach((button) => {
   button.addEventListener("click", () => setTool(button.dataset.objectTool));
+});
+
+drawFieldReachButton.addEventListener("click", () => {
+  state.draftFieldReach = [];
+  fieldStatusLabel.textContent = "Ritar planerad sträcka";
+  setTool("field");
+});
+prepareFieldAreaButton.addEventListener("click", prepareFieldArea);
+clearFieldAreaButton.addEventListener("click", clearFieldAreaDraft);
+fieldBufferSelect.addEventListener("change", () => {
+  fieldCustomBufferWrap.classList.toggle("hidden", fieldBufferSelect.value !== "custom");
 });
 
 startStopButton.addEventListener("click", () => {
