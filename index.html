@@ -34,6 +34,28 @@
           </div>
           <ul id="project-list" class="item-list"></ul>
         </div>
+        <div class="app-settings">
+          <h2>Inställningar</h2>
+          <label class="basemap-control" for="basemap-select">
+            <span>Bakgrund</span>
+            <select id="basemap-select">
+              <option value="osm">OSM</option>
+              <option value="lm-muted">LM nedtonad</option>
+              <option value="lm-topo">LM topo</option>
+            </select>
+          </label>
+          <details class="token-settings">
+            <summary>Lantmäteriet-behörighet</summary>
+            <div class="token-grid">
+              <input id="lantmateriet-token-input" type="password" autocomplete="off" placeholder="Token eller användare:lösenord" />
+              <button id="save-lantmateriet-token-button" class="secondary-button" type="button">Spara</button>
+              <button id="test-lantmateriet-token-button" class="quiet-button" type="button">Testa</button>
+              <button id="clear-lantmateriet-token-button" class="quiet-button" type="button">Rensa</button>
+            </div>
+            <p class="status-hint">Används för Hydrografi och, om det behövs, Lantmäteriets baskarta. Sparas bara lokalt på enheten.</p>
+          </details>
+          <button id="theme-toggle-button" class="theme-toggle-button" type="button" aria-pressed="false">Mörkt</button>
+        </div>
       </div>
     </section>
     <main class="app-shell">
@@ -44,15 +66,6 @@
           <button id="map-zoom-in" type="button" aria-label="Zooma in">+</button>
           <button id="map-zoom-out" type="button" aria-label="Zooma ut">−</button>
         </div>
-        <label class="basemap-control" for="basemap-select">
-          <span>Bakgrund</span>
-          <select id="basemap-select">
-            <option value="lm-muted" selected>LM nedtonad</option>
-            <option value="lm-topo">LM topo</option>
-            <option value="osm">OSM</option>
-          </select>
-        </label>
-        <button id="theme-toggle-button" class="theme-toggle-button" type="button" aria-pressed="false">Mörkt</button>
         <div id="map-toolbar" class="map-toolbar collapsed">
           <button class="icon-button active" id="tool-pan" title="Flytta karta" aria-label="Flytta karta">
             <span>✋</span>
@@ -179,16 +192,6 @@
                 <button id="fetch-osm-waterways-button" class="secondary-button" type="button">Hämta OSM i kartvyn</button>
                 <button id="use-reference-line-button" class="quiet-button" type="button" disabled>Använd vald linje</button>
               </div>
-              <details class="token-settings">
-                <summary>Lantmäteriet-behörighet</summary>
-                <div class="token-grid">
-                  <input id="lantmateriet-token-input" type="password" autocomplete="off" placeholder="Token eller användare:lösenord" />
-                  <button id="save-lantmateriet-token-button" class="secondary-button" type="button">Spara</button>
-                  <button id="test-lantmateriet-token-button" class="quiet-button" type="button">Testa</button>
-                  <button id="clear-lantmateriet-token-button" class="quiet-button" type="button">Rensa</button>
-                </div>
-                <p class="status-hint">Själva linjerna kräver behörighet. Spara inget här som du inte vill ha lokalt på enheten.</p>
-              </details>
               <input id="reference-line-input" type="file" accept=".geojson,.json,.kml,application/geo+json,application/json,application/vnd.google-earth.kml+xml" hidden />
               <p id="reference-line-status" class="status-hint">Ingen stödlinje importerad.</p>
               <ul id="reference-line-list" class="item-list reference-line-list"></ul>

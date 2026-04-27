@@ -26,10 +26,12 @@ const baseMaps = {
   "lm-muted": {
     url: "https://maps.lantmateriet.se/open/topowebb-ccby/v1/wmts/1.0.0/topowebb_nedtonad/default/3857/{z}/{y}/{x}.png",
     options: { maxZoom: 15, attribution: "© Lantmäteriet CC BY 4.0" },
+    requiresAuth: true,
   },
   "lm-topo": {
     url: "https://maps.lantmateriet.se/open/topowebb-ccby/v1/wmts/1.0.0/topowebb/default/3857/{z}/{y}/{x}.png",
     options: { maxZoom: 15, attribution: "© Lantmäteriet CC BY 4.0" },
+    requiresAuth: true,
   },
   osm: {
     url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
@@ -629,15 +631,60 @@ function makeSvg(name, attributes = {}) {
   return element;
 }
 
-function setBaseMap(id = basemapSelect?.value ?? "lm-muted") {
+function setBaseMap(id = basemapSelect?.value ?? "osm") {
   if (!state.backgroundMap || !window.L) return;
-  const nextId = baseMaps[id] ? id : "lm-muted";
+  const requestedId = baseMaps[id] ? id : "osm";
+  const auth = savedLantmaterietToken();
+  const canUseTileAuth = auth.includes(":");
+  const nextId = baseMaps[requestedId].requiresAuth && !canUseTileAuth ? "osm" : requestedId;
   if (state.baseMapLayer) state.backgroundMap.removeLayer(state.baseMapLayer);
   const config = baseMaps[nextId];
-  state.baseMapLayer = window.L.tileLayer(config.url, config.options).addTo(state.backgroundMap);
+  state.baseMapLayer = config.requiresAuth
+    ? authenticatedTileLayer(config.url, config.options, auth)
+    : window.L.tileLayer(config.url, config.options);
+  state.baseMapLayer.addTo(state.backgroundMap);
   state.baseMapLayer.bringToBack();
   if (basemapSelect) basemapSelect.value = nextId;
   localStorage.setItem(BASEMAP_KEY, nextId);
+}
+
+function base64Encode(value) {
+  return btoa(unescape(encodeURIComponent(value)));
+}
+
+function authorizationHeader(auth) {
+  if (!auth) return "";
+  return auth.includes(":") ? `Basic ${base64Encode(auth)}` : `Bearer ${auth}`;
+}
+
+function authenticatedTileLayer(urlTemplate, options, auth) {
+  return window.L.GridLayer.extend({
+    createTile(coords, done) {
+      const tile = document.createElement("img");
+      tile.alt = "";
+      const url = window.L.Util.template(urlTemplate, {
+        ...coords,
+        s: this._getSubdomain(coords),
+      });
+      fetch(url, {
+        headers: { Authorization: authorizationHeader(auth) },
+      })
+        .then((response) => {
+          if (!response.ok) throw new Error(`Tile ${response.status}`);
+          return response.blob();
+        })
+        .then((blob) => {
+          const objectUrl = URL.createObjectURL(blob);
+          tile.onload = () => URL.revokeObjectURL(objectUrl);
+          tile.src = objectUrl;
+          done(null, tile);
+        })
+        .catch((error) => {
+          done(error, tile);
+        });
+      return tile;
+    },
+  })(options);
 }
 
 function setTheme(theme = localStorage.getItem(THEME_KEY) ?? "dark") {
@@ -648,7 +695,7 @@ function setTheme(theme = localStorage.getItem(THEME_KEY) ?? "dark") {
     themeToggleButton.textContent = nextTheme === "dark" ? "Ljust" : "Mörkt";
     themeToggleButton.setAttribute("aria-pressed", String(nextTheme === "dark"));
   }
-  setBaseMap(basemapSelect?.value ?? localStorage.getItem(BASEMAP_KEY) ?? "lm-muted");
+  setBaseMap(basemapSelect?.value ?? localStorage.getItem(BASEMAP_KEY) ?? "osm");
 }
 
 function initBackgroundMap() {
@@ -668,7 +715,7 @@ function initBackgroundMap() {
   });
   background.on("move zoom", renderGps);
   state.backgroundMap = background;
-  setBaseMap(localStorage.getItem(BASEMAP_KEY) ?? basemapSelect?.value ?? "lm-muted");
+  setBaseMap(localStorage.getItem(BASEMAP_KEY) ?? basemapSelect?.value ?? "osm");
   state.leafletLayers = {
     field: window.L.layerGroup().addTo(background),
     references: window.L.layerGroup().addTo(background),
@@ -2095,12 +2142,14 @@ function saveLantmaterietToken() {
   }
   localStorage.setItem(LANTMATERIET_TOKEN_KEY, token);
   referenceLineStatus.textContent = "Lantmäteriet-behörighet sparad lokalt.";
+  setBaseMap(basemapSelect?.value ?? localStorage.getItem(BASEMAP_KEY) ?? "osm");
 }
 
 function clearLantmaterietToken() {
   localStorage.removeItem(LANTMATERIET_TOKEN_KEY);
   if (lantmaterietTokenInput) lantmaterietTokenInput.value = "";
   referenceLineStatus.textContent = "Lantmäteriet-behörighet rensad från webbläsaren.";
+  setBaseMap("osm");
 }
 
 function mapBoundsParams(limit = 1000) {
@@ -2126,7 +2175,7 @@ async function fetchLantmaterietJson(params, token) {
     if (!response.ok) throw new Error(`Lantmäteriet svarade ${response.status}. Själva linjerna kräver behörighet.`);
     return response.json();
   }
-  const authorization = token.includes(":") ? `Basic ${btoa(token)}` : `Bearer ${token}`;
+  const authorization = authorizationHeader(token);
   try {
     const response = await fetch(url, {
       headers: {
