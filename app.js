@@ -25,23 +25,23 @@ const LANTMATERIET_ATTRIBUTION = "Hydrografi Direkt © Lantmäteriet, bearbetad,
 const LANTMATERIET_WMTS_ATTRIBUTION = "Topografisk webbkarta © Lantmäteriet";
 const LANTMATERIET_WMTS_OPTIONS = {
   minZoom: 0,
-  maxZoom: 15,
-  maxNativeZoom: 15,
+  maxZoom: 14,
+  maxNativeZoom: 14,
   tileSize: 256,
   attribution: LANTMATERIET_WMTS_ATTRIBUTION,
 };
 const baseMaps = {
   "lm-muted": {
     label: "LM nedtonad",
+    // WMTS REST order is TileMatrix/TileRow/TileCol, which maps to Leaflet z/y/x.
     url: "https://maps.lantmateriet.se/open/topowebb-ccby/v1/wmts/1.0.0/topowebb_nedtonad/default/3857/{z}/{y}/{x}.png",
     options: LANTMATERIET_WMTS_OPTIONS,
-    fallbackOnTileError: true,
   },
   "lm-topo": {
     label: "LM topo",
+    // WMTS REST order is TileMatrix/TileRow/TileCol, which maps to Leaflet z/y/x.
     url: "https://maps.lantmateriet.se/open/topowebb-ccby/v1/wmts/1.0.0/topowebb/default/3857/{z}/{y}/{x}.png",
     options: LANTMATERIET_WMTS_OPTIONS,
-    fallbackOnTileError: true,
   },
   osm: {
     label: "OSM",
@@ -457,10 +457,16 @@ function supportSlice(start, stop) {
 }
 
 function activeSupportLine() {
-  if (state.draftFieldReach.length > 1) return state.draftFieldReach;
   const selected = selectedReferenceLines();
   if (selected.length) return combinedReferenceLinePoints(selected);
-  return state.fieldPackages.at(-1)?.plannedReach?.length > 1 ? state.fieldPackages.at(-1).plannedReach : null;
+  if (state.draftFieldReach.length > 1) return state.draftFieldReach;
+  return null;
+}
+
+function clearTemporaryDrawingState() {
+  state.tempObject = null;
+  state.dragging = null;
+  previewLayer.innerHTML = "";
 }
 
 function snapToLine(point, points) {
@@ -665,13 +671,14 @@ function attachBaseMapDiagnostics(layer, baseMapId) {
   layer.on?.("tileerror", (event) => {
     errorCount += 1;
     logTileError(baseMapId, event);
-    if (baseMaps[baseMapId]?.fallbackOnTileError && errorCount === 4 && basemapSelect?.value === baseMapId) {
-      console.warn("[InField basemap fallback]", `Faller tillbaka till OSM efter ${errorCount} tile-fel för ${baseMapId}.`);
-      setBaseMap("osm", { remember: false });
+    if (errorCount === 4 && basemapSelect?.value === baseMapId) {
+      const warning = "LM-kartan kunde inte laddas helt. Kontrollera nätverk eller välj annan baskarta.";
+      mapHint.textContent = warning;
+      sideMapHint.textContent = warning;
     }
   });
   layer.on?.("tileloadstart", (event) => {
-    if (!baseMaps[baseMapId]?.fallbackOnTileError) return;
+    if (!baseMapId?.startsWith("lm-")) return;
     const coords = event.coords ?? {};
     if (coords.z > (baseMaps[baseMapId].options.maxNativeZoom ?? baseMaps[baseMapId].options.maxZoom)) {
       console.warn("[InField basemap zoom warning]", {
@@ -1054,6 +1061,8 @@ function isReferenceLineSelected(line) {
 function toggleReferenceLineSelection(id) {
   const ids = selectedReferenceLineIds();
   setSelectedReferenceLineIds(ids.includes(id) ? ids.filter((item) => item !== id) : [...ids, id]);
+  state.draftFieldReach = [];
+  clearTemporaryDrawingState();
 }
 
 function referenceLineSortKey(line) {
@@ -1117,6 +1126,7 @@ function toolTab(tool) {
 
 function createSection() {
   clearSelectedObject();
+  clearTemporaryDrawingState();
   const startPoint = state.sections.at(-1)?.points.at(-1) ?? null;
   state.activeSection = {
     id: crypto.randomUUID(),
@@ -1133,9 +1143,21 @@ function createSection() {
   render();
 }
 
+function expandedSectionPoints(section) {
+  if (!section?.points || section.points.length < 2) return section?.points ?? [];
+  if (section.points.length > 2) return section.points;
+  const support = activeSupportLine();
+  if (!support?.length || support.length < 2) return section.points;
+  const startSnap = snapToLine(section.points[0], support);
+  const stopSnap = snapToLine(section.points.at(-1), support);
+  return lineSlice(support, startSnap, stopSnap);
+}
+
 function finishSection() {
   if (!state.activeSection || state.activeSection.points.length < 2) return;
   syncFormToProtocol();
+  state.activeSection.points = expandedSectionPoints(state.activeSection);
+  clearTemporaryDrawingState();
   state.activeSection.status = "finished";
   state.activeSection.editingExisting = false;
   state.activeSection.startConfirmed = true;
@@ -1552,22 +1574,20 @@ function renderFieldPackages() {
       });
     }
   });
-  if (state.draftFieldReach.length) {
+  if (!state.mappingStarted && state.draftFieldReach.length) {
     if (state.leafletLayers?.field && window.L) {
       if (state.draftFieldReach.length > 1) {
         window.L.polyline(toLatLngs(state.draftFieldReach), { color: "#2563eb", weight: 5 }).addTo(state.leafletLayers.field);
       }
-      if (!state.mappingStarted) {
-        state.draftFieldReach.forEach((point) => {
-          window.L.circleMarker(toLatLng(point), {
-            radius: 7,
-            color: "#111827",
-            weight: 2,
-            fillColor: "#ffffff",
-            fillOpacity: 1,
-          }).addTo(state.leafletLayers.field);
-        });
-      }
+      state.draftFieldReach.forEach((point) => {
+        window.L.circleMarker(toLatLng(point), {
+          radius: 7,
+          color: "#111827",
+          weight: 2,
+          fillColor: "#ffffff",
+          fillOpacity: 1,
+        }).addTo(state.leafletLayers.field);
+      });
       return;
     }
     fieldLayer.append(
@@ -1576,11 +1596,9 @@ function renderFieldPackages() {
         class: "field-reach",
       }),
     );
-    if (!state.mappingStarted) {
-      state.draftFieldReach.forEach((point) => {
-        fieldLayer.append(makeSvg("circle", { cx: point[0], cy: point[1], r: 8, class: "vertex" }));
-      });
-    }
+    state.draftFieldReach.forEach((point) => {
+      fieldLayer.append(makeSvg("circle", { cx: point[0], cy: point[1], r: 8, class: "vertex" }));
+    });
   }
 }
 
@@ -2075,6 +2093,8 @@ function addReferenceLines(lines, source = "", options = {}) {
     return;
   }
   state.referenceLines.push(...cleanLines);
+  state.draftFieldReach = [];
+  clearTemporaryDrawingState();
   setSelectedReferenceLineIds(options.autoSelect ? [cleanLines[0].id] : []);
   referenceLineStatus.textContent = `${cleanLines.length} stödlinje${cleanLines.length === 1 ? "" : "r"} hämtad${cleanLines.length === 1 ? "" : "e"}. Välj en eller flera i listan.`;
   if (options.fit !== false) fitMapToPoints(cleanLines[0].points);
@@ -2293,6 +2313,7 @@ function useSelectedReferenceLine() {
   const lines = selectedReferenceLines();
   if (!lines.length) return;
   state.draftFieldReach = combinedReferenceLinePoints(lines);
+  clearTemporaryDrawingState();
   fieldStatusLabel.textContent = "Stödlinje redo";
   mapHint.textContent = lines.length === 1
     ? "Vald stödlinje används som stödlinje. Tryck Starta kartering när du är redo."
@@ -2360,13 +2381,15 @@ function prepareFieldArea() {
 }
 
 function startMapping() {
-  if (state.draftFieldReach.length < 2 && selectedReferenceLines().length) {
-    state.draftFieldReach = combinedReferenceLinePoints(selectedReferenceLines());
+  const selectedLines = selectedReferenceLines();
+  if (selectedLines.length) {
+    state.draftFieldReach = combinedReferenceLinePoints(selectedLines);
   }
   if (state.draftFieldReach.length < 2) {
     fieldStatusLabel.textContent = "Välj eller rita en stödlinje först";
     return;
   }
+  clearTemporaryDrawingState();
   state.mappingStarted = true;
   setTool("pan");
   activateTab("protocol");
@@ -2379,6 +2402,7 @@ function startMapping() {
 }
 
 function skipFieldArea() {
+  clearTemporaryDrawingState();
   state.mappingStarted = true;
   saveProject();
   setTool("pan");
@@ -2388,6 +2412,7 @@ function skipFieldArea() {
 function clearFieldAreaDraft() {
   state.draftFieldReach = [];
   setSelectedReferenceLineIds([]);
+  clearTemporaryDrawingState();
   setTool("pan");
   fieldStatusLabel.textContent = "Ingen stödlinje vald";
   saveProject();
@@ -2433,21 +2458,24 @@ async function exportGeoJson(projectPayload = null) {
   const exportSections = [...(exportState.sections ?? []), exportState.activeSection].filter(
     (section) => section && section.points?.length > 1,
   );
-  const sectionFeatures = exportSections.map((section) => ({
-    type: "Feature",
-    properties: {
-      id: section.id,
-      lager: "delstrackor",
-      vattendrag: exportState.watercourse,
-      inventor: exportState.projectMeta?.inventor ?? "",
-      stracka_nr: section.number,
-      length: formatLength(section.points),
-      koordinater: coordinateSystem,
-      ...pointSummary(section.points),
-      ...section.attributes,
-    },
-    geometry: geometryToGeo({ type: "LineString", coordinates: section.points }),
-  }));
+  const sectionFeatures = exportSections.map((section) => {
+    const sectionPoints = projectPayload ? section.points : expandedSectionPoints(section);
+    return {
+      type: "Feature",
+      properties: {
+        id: section.id,
+        lager: "delstrackor",
+        vattendrag: exportState.watercourse,
+        inventor: exportState.projectMeta?.inventor ?? "",
+        stracka_nr: section.number,
+        length: formatLength(sectionPoints),
+        koordinater: coordinateSystem,
+        ...pointSummary(sectionPoints),
+        ...section.attributes,
+      },
+      geometry: geometryToGeo({ type: "LineString", coordinates: sectionPoints }),
+    };
+  });
   const objectFeatures = exportState.objects.map((object) => {
     const section = exportSections.find((item) => item.id === object.sectionId) ?? exportState.activeSection;
     return {
@@ -2788,6 +2816,8 @@ document.querySelectorAll("[data-object-tool]").forEach((button) => {
 
 drawFieldReachButton.addEventListener("click", () => {
   state.draftFieldReach = [];
+  setSelectedReferenceLineIds([]);
+  clearTemporaryDrawingState();
   fieldStatusLabel.textContent = "Ritar planerad sträcka";
   mapHint.textContent = selectedReferenceLine()
     ? "Klicka start och stopp på stödlinjen."
@@ -2825,6 +2855,8 @@ referenceLineList.addEventListener("click", (event) => {
   if (deleteId) {
     state.referenceLines = state.referenceLines.filter((line) => line.id !== deleteId);
     setSelectedReferenceLineIds(selectedReferenceLineIds().filter((id) => id !== deleteId));
+    state.draftFieldReach = [];
+    clearTemporaryDrawingState();
     saveProject();
     render();
   }
