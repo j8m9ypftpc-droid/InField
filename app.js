@@ -17,9 +17,25 @@
 ];
 
 const LANTMATERIET_TOKEN_KEY = "infield:lantmateriet-token";
+const BASEMAP_KEY = "infield:basemap";
+const THEME_KEY = "infield:theme";
 const LANTMATERIET_WATERCOURSE_URL =
   "https://api.lantmateriet.se/ogc-features/v1/hydrografi/collections/WatercourseLine/items";
 const LANTMATERIET_ATTRIBUTION = "Hydrografi Direkt © Lantmäteriet, bearbetad, CC BY 4.0";
+const baseMaps = {
+  "lm-muted": {
+    url: "https://maps.lantmateriet.se/open/topowebb-ccby/v1/wmts/1.0.0/topowebb_nedtonad/default/3857/{z}/{y}/{x}.png",
+    options: { maxZoom: 15, attribution: "© Lantmäteriet CC BY 4.0" },
+  },
+  "lm-topo": {
+    url: "https://maps.lantmateriet.se/open/topowebb-ccby/v1/wmts/1.0.0/topowebb/default/3857/{z}/{y}/{x}.png",
+    options: { maxZoom: 15, attribution: "© Lantmäteriet CC BY 4.0" },
+  },
+  osm: {
+    url: "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+    options: { maxZoom: 19, attribution: "&copy; OpenStreetMap contributors" },
+  },
+};
 
 const protocolOptions = {
   hymotyp: ["Bt", "Bx", "Cx", "Ex", "Tt"],
@@ -231,6 +247,7 @@ const state = {
   draftFieldReach: [],
   referenceLines: [],
   selectedReferenceLineId: null,
+  selectedReferenceLineIds: [],
   mappingStarted: false,
   tool: "pan",
   lastObjectTool: "point",
@@ -244,6 +261,7 @@ const state = {
   hasCenteredOnGps: false,
   mapOffset: [0, 0],
   useSupportLine: false,
+  baseMapLayer: null,
 };
 
 const map = document.querySelector("#map");
@@ -251,6 +269,8 @@ const mapToolbar = document.querySelector("#map-toolbar");
 const toolMenuButton = document.querySelector("#tool-menu-button");
 const mapZoomInButton = document.querySelector("#map-zoom-in");
 const mapZoomOutButton = document.querySelector("#map-zoom-out");
+const basemapSelect = document.querySelector("#basemap-select");
+const themeToggleButton = document.querySelector("#theme-toggle-button");
 const startScreen = document.querySelector("#start-screen");
 const splashCover = document.querySelector("#splash-cover");
 const projectList = document.querySelector("#project-list");
@@ -310,7 +330,6 @@ const fieldPackageList = document.querySelector("#field-package-list");
 const fieldStepPanel = document.querySelector("#field-step-panel");
 const mappingWorkspace = document.querySelector("#mapping-workspace");
 const startMappingButton = document.querySelector("#start-mapping-button");
-const skipFieldAreaButton = document.querySelector("#skip-field-area-button");
 const fetchLantmaterietWaterwaysButton = document.querySelector("#fetch-lantmateriet-waterways-button");
 const importReferenceLineButton = document.querySelector("#import-reference-line-button");
 const fetchOsmWaterwaysButton = document.querySelector("#fetch-osm-waterways-button");
@@ -610,6 +629,28 @@ function makeSvg(name, attributes = {}) {
   return element;
 }
 
+function setBaseMap(id = basemapSelect?.value ?? "lm-muted") {
+  if (!state.backgroundMap || !window.L) return;
+  const nextId = baseMaps[id] ? id : "lm-muted";
+  if (state.baseMapLayer) state.backgroundMap.removeLayer(state.baseMapLayer);
+  const config = baseMaps[nextId];
+  state.baseMapLayer = window.L.tileLayer(config.url, config.options).addTo(state.backgroundMap);
+  state.baseMapLayer.bringToBack();
+  if (basemapSelect) basemapSelect.value = nextId;
+  localStorage.setItem(BASEMAP_KEY, nextId);
+}
+
+function setTheme(theme = localStorage.getItem(THEME_KEY) ?? "dark") {
+  const nextTheme = theme === "light" ? "light" : "dark";
+  document.documentElement.dataset.theme = nextTheme;
+  localStorage.setItem(THEME_KEY, nextTheme);
+  if (themeToggleButton) {
+    themeToggleButton.textContent = nextTheme === "dark" ? "Ljust" : "Mörkt";
+    themeToggleButton.setAttribute("aria-pressed", String(nextTheme === "dark"));
+  }
+  setBaseMap(basemapSelect?.value ?? localStorage.getItem(BASEMAP_KEY) ?? "lm-muted");
+}
+
 function initBackgroundMap() {
   if (!window.L) return;
   const background = window.L.map("background-map", {
@@ -625,12 +666,9 @@ function initBackgroundMap() {
     tap: true,
     touchZoom: true,
   });
-  window.L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom: 19,
-    attribution: "&copy; OpenStreetMap contributors",
-  }).addTo(background);
   background.on("move zoom", renderGps);
   state.backgroundMap = background;
+  setBaseMap(localStorage.getItem(BASEMAP_KEY) ?? basemapSelect?.value ?? "lm-muted");
   state.leafletLayers = {
     field: window.L.layerGroup().addTo(background),
     references: window.L.layerGroup().addTo(background),
@@ -725,6 +763,7 @@ function saveProject(options = {}) {
     fieldPackages: state.fieldPackages,
     referenceLines: state.referenceLines,
     selectedReferenceLineId: state.selectedReferenceLineId,
+    selectedReferenceLineIds: selectedReferenceLineIds(),
     mappingStarted: state.mappingStarted,
     projectMeta: state.projectMeta,
     savedAt: new Date().toISOString(),
@@ -762,7 +801,7 @@ function openWatercourse(name, saveCurrent = true) {
     state.photos = payload.photos ?? [];
     state.fieldPackages = (payload.fieldPackages ?? []).map(normalizeFieldPackage);
     state.referenceLines = (payload.referenceLines ?? []).map(normalizeReferenceLine);
-    state.selectedReferenceLineId = payload.selectedReferenceLineId ?? state.referenceLines[0]?.id ?? null;
+    setSelectedReferenceLineIds(payload.selectedReferenceLineIds ?? (payload.selectedReferenceLineId ? [payload.selectedReferenceLineId] : [state.referenceLines[0]?.id].filter(Boolean)));
     state.draftFieldReach = [];
     state.mappingStarted = Boolean(payload.mappingStarted || (payload.sections?.length ?? 0) > 0 || payload.activeSection);
     state.projectMeta = { ...defaultProjectMeta(), ...(payload.projectMeta ?? {}) };
@@ -778,6 +817,7 @@ function openWatercourse(name, saveCurrent = true) {
     state.fieldPackages = [];
     state.referenceLines = [];
     state.selectedReferenceLineId = null;
+    state.selectedReferenceLineIds = [];
     state.draftFieldReach = [];
     state.mappingStarted = false;
     state.projectMeta = defaultProjectMeta();
@@ -876,8 +916,42 @@ function normalizeReferenceLine(line) {
   };
 }
 
+function selectedReferenceLineIds() {
+  const ids = Array.isArray(state.selectedReferenceLineIds)
+    ? state.selectedReferenceLineIds
+    : state.selectedReferenceLineId
+      ? [state.selectedReferenceLineId]
+      : [];
+  const existingIds = new Set(state.referenceLines.map((line) => line.id));
+  return ids.filter((id) => existingIds.has(id));
+}
+
+function setSelectedReferenceLineIds(ids) {
+  const uniqueIds = [...new Set(ids)].filter(Boolean);
+  state.selectedReferenceLineIds = uniqueIds;
+  state.selectedReferenceLineId = uniqueIds[0] ?? null;
+}
+
+function selectedReferenceLines() {
+  const byId = new Map(state.referenceLines.map((line) => [line.id, line]));
+  return selectedReferenceLineIds().map((id) => byId.get(id)).filter(Boolean);
+}
+
 function selectedReferenceLine() {
-  return state.referenceLines.find((line) => line.id === state.selectedReferenceLineId) ?? null;
+  return selectedReferenceLines()[0] ?? null;
+}
+
+function isReferenceLineSelected(line) {
+  return selectedReferenceLineIds().includes(line.id);
+}
+
+function toggleReferenceLineSelection(id) {
+  const ids = selectedReferenceLineIds();
+  setSelectedReferenceLineIds(ids.includes(id) ? ids.filter((item) => item !== id) : [...ids, id]);
+}
+
+function referenceLineSortKey(line) {
+  return (line.name ?? "").replace(/\s+\d+$/, "").trim().toLocaleLowerCase("sv-SE");
 }
 
 function setTool(tool) {
@@ -1355,7 +1429,7 @@ function renderFieldPackages() {
   state.leafletLayers?.field?.clearLayers();
   state.referenceLines.forEach((line) => {
     if (line.points.length < 2) return;
-    const selected = line.id === state.selectedReferenceLineId;
+    const selected = isReferenceLineSelected(line);
     if (state.leafletLayers?.references && window.L) {
       const layer = window.L.polyline(toLatLngs(line.points), {
         color: selected ? "#0f766e" : "#64748b",
@@ -1364,8 +1438,8 @@ function renderFieldPackages() {
         dashArray: selected ? null : "8 8",
       }).addTo(state.leafletLayers.references);
       layer.on("click", () => {
-        state.selectedReferenceLineId = line.id;
-        referenceLineStatus.textContent = `Vald stödlinje: ${line.name}`;
+        toggleReferenceLineSelection(line.id);
+        referenceLineStatus.textContent = isReferenceLineSelected(line) ? `Vald stödlinje: ${line.name}` : `Avmarkerad stödlinje: ${line.name}`;
         saveProject();
         render();
       });
@@ -1613,16 +1687,26 @@ function renderLists() {
   });
 
   referenceLineList.innerHTML = "";
-  useReferenceLineButton.disabled = !selectedReferenceLine();
+  const selectedLines = selectedReferenceLines();
+  useReferenceLineButton.disabled = !selectedLines.length;
+  useReferenceLineButton.textContent = selectedLines.length > 1 ? "Använd valda linjer" : "Använd vald linje";
   referenceLineStatus.textContent = state.referenceLines.length
-    ? selectedReferenceLine()
-      ? `Vald stödlinje: ${selectedReferenceLine().name}`
+    ? selectedLines.length
+      ? `${selectedLines.length} stödlinje${selectedLines.length === 1 ? "" : "r"} vald${selectedLines.length === 1 ? "" : "a"}`
       : "Välj en stödlinje på kartan eller i listan."
     : "Ingen stödlinje importerad.";
-  state.referenceLines.forEach((line) => {
+  state.referenceLines
+    .slice()
+    .sort((a, b) => {
+      const nameSort = referenceLineSortKey(a).localeCompare(referenceLineSortKey(b), "sv-SE", { numeric: true });
+      if (nameSort) return nameSort;
+      return (a.name ?? "").localeCompare(b.name ?? "", "sv-SE", { numeric: true });
+    })
+    .forEach((line) => {
     const li = document.createElement("li");
-    li.className = line.id === state.selectedReferenceLineId ? "selected compact" : "compact";
-    li.innerHTML = `<strong>${line.name}</strong><span>${formatLength(line.points)} · ${line.points.length} punkter</span><div class="list-actions"><button class="quiet-button" data-select-reference-line="${line.id}">Välj</button><button class="danger-button" data-delete-reference-line="${line.id}">Ta bort</button></div>`;
+    const selected = isReferenceLineSelected(line);
+    li.className = selected ? "selected compact" : "compact";
+    li.innerHTML = `<strong>${line.name}</strong><span>${formatLength(line.points)} · ${line.points.length} punkter</span><div class="list-actions"><button class="quiet-button" data-select-reference-line="${line.id}">${selected ? "Vald" : "Välj"}</button><button class="danger-button" data-delete-reference-line="${line.id}">Ta bort</button></div>`;
     referenceLineList.append(li);
   });
 
@@ -1928,9 +2012,9 @@ function addReferenceLines(lines, source = "", options = {}) {
     return;
   }
   state.referenceLines.push(...cleanLines);
-  state.selectedReferenceLineId = cleanLines[0].id;
+  setSelectedReferenceLineIds([cleanLines[0].id]);
   referenceLineStatus.textContent = `${cleanLines.length} stödlinje${cleanLines.length === 1 ? "" : "r"} importerad${cleanLines.length === 1 ? "" : "e"}.`;
-  fitMapToPoints(cleanLines[0].points);
+  if (options.fit !== false) fitMapToPoints(cleanLines[0].points);
   saveProject();
   render();
 }
@@ -2081,7 +2165,7 @@ async function fetchLantmaterietWaterwaysInView(testOnly = false) {
       return;
     }
     const lines = collectGeoJsonLines(data).map((line) => ({ ...line, license: LANTMATERIET_ATTRIBUTION }));
-    addReferenceLines(lines, "Lantmäteriet Hydrografi Direkt", { license: LANTMATERIET_ATTRIBUTION });
+    addReferenceLines(lines, "Lantmäteriet Hydrografi Direkt", { license: LANTMATERIET_ATTRIBUTION, fit: false });
     if ((data.numberMatched ?? 0) > lines.length) {
       referenceLineStatus.textContent = `${lines.length} Lantmäteriet-linjer hämtade. Zooma in mer om du vill minska urvalet.`;
     }
@@ -2140,15 +2224,38 @@ async function fetchOsmWaterwaysInView() {
 }
 
 function useSelectedReferenceLine() {
-  const line = selectedReferenceLine();
-  if (!line) return;
-  state.draftFieldReach = [...line.points];
+  const lines = selectedReferenceLines();
+  if (!lines.length) return;
+  state.draftFieldReach = combinedReferenceLinePoints(lines);
   fieldStatusLabel.textContent = "Tryck Förbered område";
-  mapHint.textContent = "Vald stödlinje används som planerad fältsträcka.";
+  mapHint.textContent = lines.length === 1
+    ? "Vald stödlinje används som planerad fältsträcka."
+    : `${lines.length} stödlinjer används som en planerad fältsträcka.`;
   sideMapHint.textContent = mapHint.textContent;
-  fitMapToPoints(line.points);
+  fitMapToPoints(state.draftFieldReach);
   saveProject();
   render();
+}
+
+function combinedReferenceLinePoints(lines) {
+  const validLines = lines.map((line) => normalizePoints(line.points ?? [])).filter((points) => points.length > 1);
+  if (!validLines.length) return [];
+  const remaining = validLines.slice(1);
+  const combined = [...validLines[0]];
+  while (remaining.length) {
+    const last = combined.at(-1);
+    let best = { index: 0, reverse: false, distance: Infinity };
+    remaining.forEach((points, index) => {
+      const forwardDistance = mapDistance(last, points[0]);
+      const reverseDistance = mapDistance(last, points.at(-1));
+      if (forwardDistance < best.distance) best = { index, reverse: false, distance: forwardDistance };
+      if (reverseDistance < best.distance) best = { index, reverse: true, distance: reverseDistance };
+    });
+    const [next] = remaining.splice(best.index, 1);
+    const oriented = best.reverse ? [...next].reverse() : next;
+    combined.push(...(best.distance < 1 ? oriented.slice(1) : oriented));
+  }
+  return combined;
 }
 
 function prepareFieldArea() {
@@ -2558,6 +2665,7 @@ function endDrag() {
 supportLine.setAttribute("d", pathFromPoints(supportPoints));
 supportLine.classList.toggle("hidden", !state.useSupportLine);
 initBackgroundMap();
+setTheme(localStorage.getItem(THEME_KEY) ?? "dark");
 renderProtocolFields();
 updateObjectTypeSelect("point", "Bestämmande sektion");
 syncLantmaterietTokenInput();
@@ -2588,6 +2696,11 @@ toolMenuButton.addEventListener("click", () => {
 });
 mapZoomInButton.addEventListener("click", () => state.backgroundMap?.zoomIn());
 mapZoomOutButton.addEventListener("click", () => state.backgroundMap?.zoomOut());
+basemapSelect?.addEventListener("change", () => setBaseMap(basemapSelect.value));
+themeToggleButton?.addEventListener("click", () => {
+  const isDark = document.documentElement.dataset.theme === "dark";
+  setTheme(isDark ? "light" : "dark");
+});
 
 document.querySelectorAll("[data-object-tool]").forEach((button) => {
   button.addEventListener("click", () => {
@@ -2609,7 +2722,6 @@ drawFieldReachButton.addEventListener("click", () => {
 prepareFieldAreaButton.addEventListener("click", prepareFieldArea);
 clearFieldAreaButton.addEventListener("click", clearFieldAreaDraft);
 startMappingButton.addEventListener("click", startMapping);
-skipFieldAreaButton.addEventListener("click", skipFieldArea);
 importReferenceLineButton.addEventListener("click", () => referenceLineInput.click());
 fetchOsmWaterwaysButton.addEventListener("click", fetchOsmWaterwaysInView);
 fetchLantmaterietWaterwaysButton?.addEventListener("click", () => fetchLantmaterietWaterwaysInView(false));
@@ -2626,18 +2738,17 @@ referenceLineList.addEventListener("click", (event) => {
   const selectId = event.target.dataset.selectReferenceLine;
   const deleteId = event.target.dataset.deleteReferenceLine;
   if (selectId) {
-    state.selectedReferenceLineId = selectId;
-    const line = selectedReferenceLine();
+    toggleReferenceLineSelection(selectId);
+    const line = state.referenceLines.find((item) => item.id === selectId);
     if (line) {
-      referenceLineStatus.textContent = `Vald stödlinje: ${line.name}`;
-      fitMapToPoints(line.points);
+      referenceLineStatus.textContent = isReferenceLineSelected(line) ? `Vald stödlinje: ${line.name}` : `Avmarkerad stödlinje: ${line.name}`;
     }
     saveProject();
     render();
   }
   if (deleteId) {
     state.referenceLines = state.referenceLines.filter((line) => line.id !== deleteId);
-    if (state.selectedReferenceLineId === deleteId) state.selectedReferenceLineId = state.referenceLines[0]?.id ?? null;
+    setSelectedReferenceLineIds(selectedReferenceLineIds().filter((id) => id !== deleteId));
     saveProject();
     render();
   }

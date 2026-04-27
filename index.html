@@ -44,6 +44,15 @@
           <button id="map-zoom-in" type="button" aria-label="Zooma in">+</button>
           <button id="map-zoom-out" type="button" aria-label="Zooma ut">−</button>
         </div>
+        <label class="basemap-control" for="basemap-select">
+          <span>Bakgrund</span>
+          <select id="basemap-select">
+            <option value="lm-muted" selected>LM nedtonad</option>
+            <option value="lm-topo">LM topo</option>
+            <option value="osm">OSM</option>
+          </select>
+        </label>
+        <button id="theme-toggle-button" class="theme-toggle-button" type="button" aria-pressed="false">Mörkt</button>
         <div id="map-toolbar" class="map-toolbar collapsed">
           <button class="icon-button active" id="tool-pan" title="Flytta karta" aria-label="Flytta karta">
             <span>✋</span>
@@ -165,9 +174,9 @@
             <div class="field-group">
               <label>Stödlinje</label>
               <div class="object-actions">
-                <button id="fetch-lantmateriet-waterways-button" class="secondary-button" type="button">Hämta Lantmäteriet</button>
+                <button id="fetch-lantmateriet-waterways-button" class="secondary-button" type="button">Hämta LM i kartvyn</button>
                 <button id="import-reference-line-button" class="secondary-button" type="button">Importera linje</button>
-                <button id="fetch-osm-waterways-button" class="secondary-button" type="button">Hämta i kartvyn</button>
+                <button id="fetch-osm-waterways-button" class="secondary-button" type="button">Hämta OSM i kartvyn</button>
                 <button id="use-reference-line-button" class="quiet-button" type="button" disabled>Använd vald linje</button>
               </div>
               <details class="token-settings">
@@ -191,7 +200,6 @@
             </div>
             <div class="field-start-actions">
               <button id="start-mapping-button" class="primary-button" type="button">Starta kartering</button>
-              <button id="skip-field-area-button" class="quiet-button" type="button">Fortsätt utan fältområde</button>
             </div>
           </div>
           <ul id="field-package-list" class="item-list"></ul>
