@@ -1472,7 +1472,6 @@ function renderLists() {
   const fieldReady = state.fieldPackages.length > 0;
   fieldStepPanel.classList.toggle("hidden", state.mappingStarted);
   mappingWorkspace.classList.toggle("hidden", !state.mappingStarted);
-  startMappingButton.disabled = !fieldReady;
   prepareFieldAreaButton.disabled = state.draftFieldReach.length < 2;
   fieldStatusLabel.textContent = state.draftFieldReach.length
     ? state.draftFieldReach.length > 1
@@ -1486,7 +1485,8 @@ function renderLists() {
     .reverse()
     .forEach((fieldPackage) => {
       const li = document.createElement("li");
-      li.innerHTML = `<strong>${fieldPackage.name}</strong><span>${fieldPackage.bufferMeters} m buffert · ${fieldPackage.statusLabel ?? "Sparat lokalt"}</span>`;
+      const pointCount = fieldPackage.plannedReach?.length ?? 0;
+      li.innerHTML = `<strong>${fieldPackage.name}</strong><span>${fieldPackage.bufferMeters} m buffert · ${pointCount} punkter · ${fieldPackage.statusLabel ?? "Sparat lokalt"}</span>`;
       fieldPackageList.append(li);
     });
 }
@@ -1743,16 +1743,17 @@ function prepareFieldArea() {
     sideMapHint.textContent = mapHint.textContent;
     return;
   }
+  const plannedReach = [...state.draftFieldReach];
   fieldStatusLabel.textContent = "Förbereder";
   const bufferMeters = fieldBufferMeters();
-  const fieldArea = bufferReach(state.draftFieldReach, bufferMeters);
+  const fieldArea = bufferReach(plannedReach, bufferMeters);
   const name = fieldPackageName.value.trim() || `Fältområde ${state.fieldPackages.length + 1}`;
   state.fieldPackages.push({
     id: crypto.randomUUID(),
     name,
     status: "Ready for offline fieldwork",
     statusLabel: "Sparat lokalt",
-    plannedReach: [...state.draftFieldReach],
+    plannedReach,
     bufferMeters,
     fieldArea,
     createdAt: new Date().toISOString(),
@@ -1763,7 +1764,6 @@ function prepareFieldArea() {
   });
   state.draftFieldReach = [];
   fieldStatusLabel.textContent = "Sparat lokalt";
-  startMappingButton.disabled = false;
   mapHint.textContent = "Fältområdet är sparat. Tryck Starta kartering när du är redo.";
   sideMapHint.textContent = mapHint.textContent;
   saveProject();
@@ -1772,6 +1772,9 @@ function prepareFieldArea() {
 }
 
 function startMapping() {
+  if (!state.fieldPackages.length && !window.confirm("Inget fältområde är sparat ännu. Vill du fortsätta utan fältområde?")) {
+    return;
+  }
   state.mappingStarted = true;
   saveProject();
   setTool("pan");
@@ -2030,7 +2033,7 @@ function handlePointInMap(point) {
       state.draftFieldReach.length > 1 ? "Tryck Förbered område" : "Ritar planerad sträcka";
     mapHint.textContent =
       state.draftFieldReach.length > 1
-        ? `${state.draftFieldReach.length} punkter i planerad sträcka. Lägg fler punkter eller tryck Förbered område.`
+        ? `${state.draftFieldReach.length} punkter i planerad sträcka. Klicka längs bäcken eller tryck Förbered område.`
         : "Lägg nästa punkt längs vattnet.";
     sideMapHint.textContent = mapHint.textContent;
   } else {
