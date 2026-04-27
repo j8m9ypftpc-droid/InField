@@ -681,7 +681,7 @@ button:disabled {
 
 .tabs {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 8px;
   margin: 14px 0;
 }
@@ -764,6 +764,22 @@ select,
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #fbfbf8;
+}
+
+.field-area-card h2 {
+  margin: 4px 0 8px;
+  font-size: 20px;
+}
+
+.field-start-actions {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.mapping-workspace {
+  display: block;
 }
 
 .hidden {

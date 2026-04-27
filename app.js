@@ -207,6 +207,7 @@ const state = {
   photos: [],
   fieldPackages: [],
   draftFieldReach: [],
+  mappingStarted: false,
   tool: "pan",
   tempObject: null,
   dragging: null,
@@ -279,6 +280,10 @@ const drawFieldReachButton = document.querySelector("#draw-field-reach-button");
 const prepareFieldAreaButton = document.querySelector("#prepare-field-area-button");
 const clearFieldAreaButton = document.querySelector("#clear-field-area-button");
 const fieldPackageList = document.querySelector("#field-package-list");
+const fieldStepPanel = document.querySelector("#field-step-panel");
+const mappingWorkspace = document.querySelector("#mapping-workspace");
+const startMappingButton = document.querySelector("#start-mapping-button");
+const skipFieldAreaButton = document.querySelector("#skip-field-area-button");
 
 state.watercourse = "Bresiljeån";
 state.selectedObjectId = null;
@@ -634,6 +639,7 @@ function saveProject() {
     objects: state.objects,
     photos: state.photos,
     fieldPackages: state.fieldPackages,
+    mappingStarted: state.mappingStarted,
     projectMeta: state.projectMeta,
     savedAt: new Date().toISOString(),
   };
@@ -670,6 +676,7 @@ function openWatercourse(name, saveCurrent = true) {
     state.photos = payload.photos ?? [];
     state.fieldPackages = (payload.fieldPackages ?? []).map(normalizeFieldPackage);
     state.draftFieldReach = [];
+    state.mappingStarted = Boolean(payload.mappingStarted || (payload.sections?.length ?? 0) > 0 || payload.activeSection);
     state.projectMeta = { ...defaultProjectMeta(), ...(payload.projectMeta ?? {}) };
     syncProjectMetaToForm();
     syncProjectChoices();
@@ -682,6 +689,7 @@ function openWatercourse(name, saveCurrent = true) {
     state.photos = [];
     state.fieldPackages = [];
     state.draftFieldReach = [];
+    state.mappingStarted = false;
     state.projectMeta = defaultProjectMeta();
     syncProjectMetaToForm();
     syncProjectChoices();
@@ -1461,6 +1469,10 @@ function renderLists() {
   });
 
   fieldPackageList.innerHTML = "";
+  const fieldReady = state.fieldPackages.length > 0;
+  fieldStepPanel.classList.toggle("hidden", state.mappingStarted);
+  mappingWorkspace.classList.toggle("hidden", !state.mappingStarted);
+  startMappingButton.disabled = !fieldReady;
   fieldStatusLabel.textContent = state.draftFieldReach.length
     ? state.draftFieldReach.length > 1
       ? "Ej sparat"
@@ -1730,6 +1742,20 @@ function prepareFieldArea() {
   });
   state.draftFieldReach = [];
   fieldStatusLabel.textContent = "Sparat lokalt";
+  saveProject();
+  setTool("pan");
+  render();
+}
+
+function startMapping() {
+  state.mappingStarted = true;
+  saveProject();
+  setTool("pan");
+  render();
+}
+
+function skipFieldArea() {
+  state.mappingStarted = true;
   saveProject();
   setTool("pan");
   render();
@@ -2054,6 +2080,8 @@ drawFieldReachButton.addEventListener("click", () => {
 });
 prepareFieldAreaButton.addEventListener("click", prepareFieldArea);
 clearFieldAreaButton.addEventListener("click", clearFieldAreaDraft);
+startMappingButton.addEventListener("click", startMapping);
+skipFieldAreaButton.addEventListener("click", skipFieldArea);
 fieldBufferSelect.addEventListener("change", () => {
   fieldCustomBufferWrap.classList.toggle("hidden", fieldBufferSelect.value !== "custom");
 });
