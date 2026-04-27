@@ -1499,15 +1499,17 @@ function renderFieldPackages() {
       if (state.draftFieldReach.length > 1) {
         window.L.polyline(toLatLngs(state.draftFieldReach), { color: "#2563eb", weight: 5 }).addTo(state.leafletLayers.field);
       }
-      state.draftFieldReach.forEach((point) => {
-        window.L.circleMarker(toLatLng(point), {
-          radius: 7,
-          color: "#111827",
-          weight: 2,
-          fillColor: "#ffffff",
-          fillOpacity: 1,
-        }).addTo(state.leafletLayers.field);
-      });
+      if (!state.mappingStarted) {
+        state.draftFieldReach.forEach((point) => {
+          window.L.circleMarker(toLatLng(point), {
+            radius: 7,
+            color: "#111827",
+            weight: 2,
+            fillColor: "#ffffff",
+            fillOpacity: 1,
+          }).addTo(state.leafletLayers.field);
+        });
+      }
       return;
     }
     fieldLayer.append(
@@ -1516,9 +1518,11 @@ function renderFieldPackages() {
         class: "field-reach",
       }),
     );
-    state.draftFieldReach.forEach((point) => {
-      fieldLayer.append(makeSvg("circle", { cx: point[0], cy: point[1], r: 8, class: "vertex" }));
-    });
+    if (!state.mappingStarted) {
+      state.draftFieldReach.forEach((point) => {
+        fieldLayer.append(makeSvg("circle", { cx: point[0], cy: point[1], r: 8, class: "vertex" }));
+      });
+    }
   }
 }
 
@@ -2020,6 +2024,7 @@ function addReferenceLines(lines, source = "", options = {}) {
   setSelectedReferenceLineIds(options.autoSelect ? [cleanLines[0].id] : []);
   referenceLineStatus.textContent = `${cleanLines.length} stödlinje${cleanLines.length === 1 ? "" : "r"} hämtad${cleanLines.length === 1 ? "" : "e"}. Välj en eller flera i listan.`;
   if (options.fit !== false) fitMapToPoints(cleanLines[0].points);
+  setTool("pan");
   saveProject();
   render();
 }
@@ -2309,9 +2314,14 @@ function startMapping() {
     return;
   }
   state.mappingStarted = true;
-  saveProject();
   setTool("pan");
+  activateTab("protocol");
   render();
+  try {
+    saveProject();
+  } catch (error) {
+    saveStateLabel.textContent = "Karteringen är startad, men webbläsaren kunde inte spara just nu.";
+  }
 }
 
 function skipFieldArea() {
@@ -2324,6 +2334,7 @@ function skipFieldArea() {
 function clearFieldAreaDraft() {
   state.draftFieldReach = [];
   setSelectedReferenceLineIds([]);
+  setTool("pan");
   fieldStatusLabel.textContent = "Ingen stödlinje vald";
   saveProject();
   render();

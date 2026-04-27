@@ -927,6 +927,23 @@ select,
   font-size: 13px;
 }
 
+.reference-line-list {
+  max-height: 240px;
+  overflow: auto;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--panel) 94%, var(--bg));
+}
+
+.reference-line-list:empty {
+  display: none;
+}
+
+.reference-line-list li {
+  padding: 10px;
+}
+
 .object-actions {
   margin-bottom: 8px;
 }
