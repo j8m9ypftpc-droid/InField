@@ -2035,6 +2035,11 @@ function mapBoundsParams(limit = 1000) {
 
 async function fetchLantmaterietJson(params, token) {
   const url = `${LANTMATERIET_WATERCOURSE_URL}?${params.toString()}`;
+  if (!token) {
+    const response = await fetch(url);
+    if (!response.ok) throw new Error("Lantmäteriet svarade inte.");
+    return response.json();
+  }
   try {
     const response = await fetch(url, {
       headers: { Authorization: `Bearer ${token}` },
@@ -2053,10 +2058,6 @@ async function fetchLantmaterietJson(params, token) {
 async function fetchLantmaterietWaterwaysInView(testOnly = false) {
   if (!state.backgroundMap) return;
   const token = (lantmaterietTokenInput?.value.trim() || savedLantmaterietToken()).trim();
-  if (!token) {
-    referenceLineStatus.textContent = "Klistra in och spara Lantmäteriet-token först.";
-    return;
-  }
   if (lantmaterietTokenInput?.value.trim()) localStorage.setItem(LANTMATERIET_TOKEN_KEY, token);
 
   const { params, span } = mapBoundsParams(testOnly ? 1 : 1000);
