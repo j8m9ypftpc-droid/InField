@@ -1473,9 +1473,10 @@ function renderLists() {
   fieldStepPanel.classList.toggle("hidden", state.mappingStarted);
   mappingWorkspace.classList.toggle("hidden", !state.mappingStarted);
   startMappingButton.disabled = !fieldReady;
+  prepareFieldAreaButton.disabled = state.draftFieldReach.length < 2;
   fieldStatusLabel.textContent = state.draftFieldReach.length
     ? state.draftFieldReach.length > 1
-      ? "Ej sparat"
+      ? "Tryck Förbered område"
       : "Ritar planerad sträcka"
     : state.fieldPackages.length
       ? "Sparat lokalt"
@@ -1672,8 +1673,28 @@ function bufferReach(points, bufferMeters) {
     ];
   }
   const origin = points[0];
-  const start = lonLatToMeters(points[0], origin);
-  const stop = lonLatToMeters(points.at(-1), origin);
+  const meterPoints = points.map((point) => lonLatToMeters(point, origin));
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  meterPoints.forEach(([x, y]) => {
+    minX = Math.min(minX, x);
+    minY = Math.min(minY, y);
+    maxX = Math.max(maxX, x);
+    maxY = Math.max(maxY, y);
+  });
+  if (points.length > 2) {
+    return [
+      metersToLonLat([minX - bufferMeters, minY - bufferMeters], origin),
+      metersToLonLat([maxX + bufferMeters, minY - bufferMeters], origin),
+      metersToLonLat([maxX + bufferMeters, maxY + bufferMeters], origin),
+      metersToLonLat([minX - bufferMeters, maxY + bufferMeters], origin),
+      metersToLonLat([minX - bufferMeters, minY - bufferMeters], origin),
+    ];
+  }
+  const start = meterPoints[0];
+  const stop = meterPoints.at(-1);
   const dx = stop[0] - start[0];
   const dy = stop[1] - start[1];
   const len = Math.hypot(dx, dy) || 1;
@@ -1742,6 +1763,9 @@ function prepareFieldArea() {
   });
   state.draftFieldReach = [];
   fieldStatusLabel.textContent = "Sparat lokalt";
+  startMappingButton.disabled = false;
+  mapHint.textContent = "Fältområdet är sparat. Tryck Starta kartering när du är redo.";
+  sideMapHint.textContent = mapHint.textContent;
   saveProject();
   setTool("pan");
   render();
@@ -2001,8 +2025,14 @@ function handlePointInMap(point) {
   } else if (state.tool === "photo") {
     triggerMapPhoto();
   } else if (state.tool === "field") {
-    state.draftFieldReach = state.draftFieldReach.length ? [state.draftFieldReach[0], point] : [point];
-    if (state.draftFieldReach.length === 2) fieldStatusLabel.textContent = "Ej sparat";
+    state.draftFieldReach.push(point);
+    fieldStatusLabel.textContent =
+      state.draftFieldReach.length > 1 ? "Tryck Förbered område" : "Ritar planerad sträcka";
+    mapHint.textContent =
+      state.draftFieldReach.length > 1
+        ? `${state.draftFieldReach.length} punkter i planerad sträcka. Lägg fler punkter eller tryck Förbered område.`
+        : "Lägg nästa punkt längs vattnet.";
+    sideMapHint.textContent = mapHint.textContent;
   } else {
     addObjectVertex(point);
   }
@@ -2076,6 +2106,7 @@ document.querySelectorAll("[data-object-tool]").forEach((button) => {
 drawFieldReachButton.addEventListener("click", () => {
   state.draftFieldReach = [];
   fieldStatusLabel.textContent = "Ritar planerad sträcka";
+  prepareFieldAreaButton.disabled = true;
   setTool("field");
 });
 prepareFieldAreaButton.addEventListener("click", prepareFieldArea);
