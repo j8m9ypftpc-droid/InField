@@ -41,10 +41,12 @@
             <summary>Lantmäteriet-behörighet</summary>
             <div class="token-grid">
               <input id="lantmateriet-token-input" type="password" autocomplete="off" placeholder="Token eller användare:lösenord" />
+              <button id="toggle-lantmateriet-token-button" class="quiet-button" type="button" aria-pressed="false">Visa</button>
               <button id="save-lantmateriet-token-button" class="secondary-button" type="button">Spara</button>
               <button id="test-lantmateriet-token-button" class="quiet-button" type="button">Testa</button>
               <button id="clear-lantmateriet-token-button" class="quiet-button" type="button">Rensa</button>
             </div>
+            <p id="lantmateriet-token-status" class="token-status" aria-live="polite"></p>
             <p class="status-hint">Används för Hydrografi och, om det behövs, Lantmäteriets baskarta. Sparas bara lokalt på enheten.</p>
           </details>
           <button id="theme-toggle-button" class="theme-toggle-button" type="button" aria-pressed="false">Mörkt</button>

@@ -350,9 +350,11 @@ const fetchLantmaterietWaterwaysButton = document.querySelector("#fetch-lantmate
 const importReferenceLineButton = document.querySelector("#import-reference-line-button");
 const fetchOsmWaterwaysButton = document.querySelector("#fetch-osm-waterways-button");
 const lantmaterietTokenInput = document.querySelector("#lantmateriet-token-input");
+const toggleLantmaterietTokenButton = document.querySelector("#toggle-lantmateriet-token-button");
 const saveLantmaterietTokenButton = document.querySelector("#save-lantmateriet-token-button");
 const testLantmaterietTokenButton = document.querySelector("#test-lantmateriet-token-button");
 const clearLantmaterietTokenButton = document.querySelector("#clear-lantmateriet-token-button");
+const lantmaterietTokenStatus = document.querySelector("#lantmateriet-token-status");
 const referenceLineInput = document.querySelector("#reference-line-input");
 const referenceLineStatus = document.querySelector("#reference-line-status");
 const referenceLineList = document.querySelector("#reference-line-list");
@@ -2191,27 +2193,43 @@ function savedLantmaterietToken() {
   return localStorage.getItem(LANTMATERIET_TOKEN_KEY)?.trim() ?? "";
 }
 
+function setLantmaterietTokenStatus(message = "", type = "") {
+  if (!lantmaterietTokenStatus) return;
+  lantmaterietTokenStatus.textContent = message;
+  lantmaterietTokenStatus.classList.toggle("success", type === "success");
+  lantmaterietTokenStatus.classList.toggle("error", type === "error");
+}
+
 function syncLantmaterietTokenInput() {
   if (!lantmaterietTokenInput) return;
   lantmaterietTokenInput.value = savedLantmaterietToken();
+  setLantmaterietTokenStatus(lantmaterietTokenInput.value ? "Behörighet finns sparad lokalt." : "");
 }
 
 function saveLantmaterietToken() {
   const token = lantmaterietTokenInput?.value.trim() ?? "";
   if (!token) {
-    referenceLineStatus.textContent = "Klistra in token, API-nyckel eller användare:lösenord först.";
+    setLantmaterietTokenStatus("Klistra in token, API-nyckel eller användare:lösenord först.", "error");
     return;
   }
   localStorage.setItem(LANTMATERIET_TOKEN_KEY, token);
-  referenceLineStatus.textContent = "Lantmäteriet-behörighet sparad lokalt.";
+  setLantmaterietTokenStatus("Sparad lokalt på den här enheten.", "success");
   setBaseMap(basemapSelect?.value ?? localStorage.getItem(BASEMAP_KEY) ?? "osm");
 }
 
 function clearLantmaterietToken() {
   localStorage.removeItem(LANTMATERIET_TOKEN_KEY);
   if (lantmaterietTokenInput) lantmaterietTokenInput.value = "";
-  referenceLineStatus.textContent = "Lantmäteriet-behörighet rensad från webbläsaren.";
+  setLantmaterietTokenStatus("Rensad från webbläsaren.", "");
   setBaseMap("osm");
+}
+
+function toggleLantmaterietTokenVisibility() {
+  if (!lantmaterietTokenInput || !toggleLantmaterietTokenButton) return;
+  const show = lantmaterietTokenInput.type === "password";
+  lantmaterietTokenInput.type = show ? "text" : "password";
+  toggleLantmaterietTokenButton.textContent = show ? "Dölj" : "Visa";
+  toggleLantmaterietTokenButton.setAttribute("aria-pressed", String(show));
 }
 
 function wait(ms) {
@@ -2274,6 +2292,27 @@ async function fetchLantmaterietJson(params, token) {
   const fallbackResponse = await fetch(`${LANTMATERIET_WATERCOURSE_URL}?${tokenParams.toString()}`);
   if (!fallbackResponse.ok) throw new Error(`Lantmäteriet svarade ${fallbackResponse.status}. Kontrollera behörigheten.`);
   return fallbackResponse.json();
+}
+
+async function testLantmaterietCredentials() {
+  const token = (lantmaterietTokenInput?.value.trim() || savedLantmaterietToken()).trim();
+  if (!token) {
+    setLantmaterietTokenStatus("Skriv in token eller användare:lösenord först.", "error");
+    return;
+  }
+
+  if (lantmaterietTokenInput?.value.trim()) localStorage.setItem(LANTMATERIET_TOKEN_KEY, token);
+  setLantmaterietTokenStatus("Testar Lantmäteriet-behörighet...", "");
+  testLantmaterietTokenButton.disabled = true;
+  try {
+    const params = new URLSearchParams({ limit: "1", f: "json" });
+    await fetchLantmaterietJson(params, token);
+    setLantmaterietTokenStatus("✓ Behörigheten fungerar.", "success");
+  } catch (error) {
+    setLantmaterietTokenStatus(error.message || "Kunde inte verifiera behörigheten.", "error");
+  } finally {
+    testLantmaterietTokenButton.disabled = false;
+  }
 }
 
 async function fetchAllLantmaterietJson(params, token) {
@@ -2888,8 +2927,9 @@ startMappingButton.addEventListener("click", startMapping);
 importReferenceLineButton.addEventListener("click", () => referenceLineInput.click());
 fetchOsmWaterwaysButton.addEventListener("click", fetchOsmWaterwaysInView);
 fetchLantmaterietWaterwaysButton?.addEventListener("click", () => fetchLantmaterietWaterwaysInView(false));
+toggleLantmaterietTokenButton?.addEventListener("click", toggleLantmaterietTokenVisibility);
 saveLantmaterietTokenButton?.addEventListener("click", saveLantmaterietToken);
-testLantmaterietTokenButton?.addEventListener("click", () => fetchLantmaterietWaterwaysInView(true));
+testLantmaterietTokenButton?.addEventListener("click", testLantmaterietCredentials);
 clearLantmaterietTokenButton?.addEventListener("click", clearLantmaterietToken);
 referenceLineInput.addEventListener("change", () => {
   const file = referenceLineInput.files?.[0];

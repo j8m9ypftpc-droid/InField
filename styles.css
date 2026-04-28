@@ -899,10 +899,26 @@ select,
 
 .token-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  grid-template-columns: minmax(0, 1fr) auto auto auto auto;
   gap: 8px;
   margin-top: 8px;
   align-items: center;
+}
+
+.token-status {
+  min-height: 24px;
+  margin: 8px 0 0;
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--muted);
+}
+
+.token-status.success {
+  color: #53d38b;
+}
+
+.token-status.error {
+  color: var(--accent-2);
 }
 
 .field-area-card {
