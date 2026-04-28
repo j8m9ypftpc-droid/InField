@@ -26,6 +26,7 @@ const LANTMATERIET_WATERCOURSE_URL =
   "https://api.lantmateriet.se/ogc-features/v1/hydrografi/collections/WatercourseLine/items";
 const LANTMATERIET_ATTRIBUTION = "Hydrografi Direkt © Lantmäteriet, bearbetad, CC BY 4.0";
 const LANTMATERIET_WMTS_ATTRIBUTION = "Topografisk webbkarta © Lantmäteriet";
+const OSM_WATERWAY_PATTERN = "^(river|stream|ditch|drain|canal)$";
 const LANTMATERIET_WMTS_OPTIONS = {
   minZoom: 0,
   maxZoom: 14,
@@ -2573,7 +2574,7 @@ async function fetchLantmaterietWaterwaysInView(testOnly = false) {
   }
 }
 
-function osmWaterwayName(tags = {}, index) {
+function osmWaterwayTypeLabel(tags = {}) {
   const type = {
     river: "Älv/å",
     stream: "Bäck",
@@ -2581,7 +2582,113 @@ function osmWaterwayName(tags = {}, index) {
     drain: "Dränering",
     canal: "Kanal",
   }[tags.waterway] ?? "Vattendrag";
-  return tags.name ? `${tags.name} (${type})` : `${type} ${index + 1}`;
+  return type;
+}
+
+function osmWaterwayName(tags = {}, index) {
+  const type = osmWaterwayTypeLabel(tags);
+  const name = firstReadableValue(tags.name ?? tags["name:sv"] ?? tags.alt_name ?? tags.ref);
+  return name ? `${name} (${type})` : `${type} ${index + 1}`;
+}
+
+function osmPointFromGeometry(point) {
+  return [Number(point.lon.toFixed(7)), Number(point.lat.toFixed(7))];
+}
+
+function osmLineProperties(tags = {}, extra = {}) {
+  return {
+    ...tags,
+    osmId: extra.osmId ?? "",
+    osmType: extra.osmType ?? "",
+    osmRelationId: extra.osmRelationId ?? "",
+    osmMemberRole: extra.osmMemberRole ?? "",
+    sourceKind: extra.sourceKind ?? "osm-waterway",
+  };
+}
+
+function osmWayToReferenceLine(element, index) {
+  return {
+    id: `osm-way-${element.id}`,
+    name: osmWaterwayName(element.tags, index),
+    properties: osmLineProperties(element.tags ?? {}, {
+      osmId: element.id,
+      osmType: "way",
+      sourceKind: "osm-way",
+    }),
+    points: element.geometry.map(osmPointFromGeometry),
+  };
+}
+
+function osmRelationMemberToReferenceLine(relation, member, index, memberIndex) {
+  const relationTags = relation.tags ?? {};
+  const memberTags = member.tags ?? {};
+  const tags = { ...relationTags, ...memberTags };
+  return {
+    id: `osm-relation-${relation.id}-way-${member.ref ?? memberIndex}`,
+    name: osmWaterwayName(tags, index),
+    properties: osmLineProperties(tags, {
+      osmId: member.ref ?? "",
+      osmType: "relation-member-way",
+      osmRelationId: relation.id,
+      osmMemberRole: member.role ?? "",
+      sourceKind: "osm-relation-member",
+    }),
+    points: member.geometry.map(osmPointFromGeometry),
+  };
+}
+
+function collectOsmWaterwayLines(data) {
+  const lines = [];
+  const seenIds = new Set();
+  const seenWayRefs = new Set();
+  const elements = data.elements ?? [];
+  elements.filter((element) => element.type === "relation").forEach((element) => {
+    if (element.type === "relation" && Array.isArray(element.members)) {
+      element.members.forEach((member, memberIndex) => {
+        if (member.type !== "way" || !member.geometry || member.geometry.length < 2) return;
+        const line = osmRelationMemberToReferenceLine(element, member, lines.length, memberIndex);
+        if (seenIds.has(line.id)) return;
+        seenIds.add(line.id);
+        if (member.ref !== undefined) seenWayRefs.add(String(member.ref));
+        lines.push(line);
+      });
+    }
+  });
+  elements.filter((element) => element.type === "way").forEach((element) => {
+    if (seenWayRefs.has(String(element.id))) return;
+    if (element.geometry?.length > 1) {
+      const line = osmWayToReferenceLine(element, lines.length);
+      seenIds.add(line.id);
+      lines.push(line);
+    }
+  });
+  return lines;
+}
+
+function osmDebugSummary(data, lines, bbox, query) {
+  const elements = data.elements ?? [];
+  const waterwayCounts = {};
+  elements.forEach((element) => {
+    const value = element.tags?.waterway ?? element.tags?.route ?? element.tags?.type ?? "saknas";
+    waterwayCounts[value] = (waterwayCounts[value] ?? 0) + 1;
+  });
+  const lineTypes = {};
+  lines.forEach((line) => {
+    const value = line.properties?.waterway ?? line.properties?.route ?? line.properties?.type ?? "saknas";
+    lineTypes[value] = (lineTypes[value] ?? 0) + 1;
+  });
+  const lineNames = lines.slice(0, 40).map((line) => safeReferenceLineName(line));
+  console.info("[InField OSM fetch]", {
+    bbox,
+    totalElements: elements.length,
+    wayElements: elements.filter((element) => element.type === "way").length,
+    relationElements: elements.filter((element) => element.type === "relation").length,
+    waterwayCounts,
+    renderedLines: lines.length,
+    renderedLineTypes: lineTypes,
+    renderedLineNames: lineNames,
+    query,
+  });
 }
 
 async function fetchOsmWaterwaysInView() {
@@ -2594,29 +2701,39 @@ async function fetchOsmWaterwaysInView() {
   if (span > 0.25 && !window.confirm("Kartvyn är ganska stor. Det kan bli mycket data. Vill du hämta ändå?")) return;
 
   referenceLineStatus.textContent = "Hämtar vattendragslinjer i kartvyn...";
+  const bbox = `${south},${west},${north},${east}`;
   const query = `
-    [out:json][timeout:25];
+    [out:json][timeout:35];
     (
-      way["waterway"~"^(river|stream|ditch|drain|canal)$"](${south},${west},${north},${east});
+      way["waterway"~"${OSM_WATERWAY_PATTERN}"](${bbox});
+      relation["waterway"~"${OSM_WATERWAY_PATTERN}"](${bbox});
+      relation["type"="waterway"](${bbox});
+      relation["type"="route"]["route"~"^(water|waterway|river)$"](${bbox});
     );
-    out geom tags;
+    out tags geom;
   `;
 
   try {
+    console.info("[InField OSM fetch] Startar hämtning.", { bbox, south, west, north, east });
     const response = await fetch("https://overpass-api.de/api/interpreter", {
       method: "POST",
       body: `data=${encodeURIComponent(query)}`,
     });
-    if (!response.ok) throw new Error("Overpass svarade inte.");
+    if (!response.ok) throw new Error(`Overpass svarade ${response.status}.`);
     const data = await response.json();
-    const lines = (data.elements ?? [])
-      .filter((element) => element.type === "way" && element.geometry?.length > 1)
-      .map((element, index) => ({
-        name: osmWaterwayName(element.tags, index),
-        points: element.geometry.map((point) => [Number(point.lon.toFixed(7)), Number(point.lat.toFixed(7))]),
-      }));
+    const lines = collectOsmWaterwayLines(data);
+    osmDebugSummary(data, lines, bbox, query);
+    if (!lines.length) {
+      referenceLineStatus.textContent = "Hittade inga OSM-vattendragslinjer i kartvyn. Zooma/panorera lite eller testa Lantmäteriet.";
+      return;
+    }
     addReferenceLines(lines, "OpenStreetMap Overpass", { fit: false });
+    const types = [...new Set(lines.map((line) => line.properties?.waterway).filter(Boolean))].join(", ");
+    if (lines.length) {
+      referenceLineStatus.textContent = `${lines.length} OSM-linje${lines.length === 1 ? "" : "r"} hämtade${types ? ` (${types})` : ""}. Välj en eller flera i listan.`;
+    }
   } catch (error) {
+    console.warn("[InField OSM fetch] Hämtningen misslyckades.", error);
     referenceLineStatus.textContent = "Kunde inte hämta linjer just nu. Testa mindre kartvy eller importera fil.";
   }
 }
