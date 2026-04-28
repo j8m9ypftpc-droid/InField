@@ -601,8 +601,16 @@ function activeSupportLine() {
 }
 
 function activeReachIds() {
-  if (Array.isArray(state.activeSegmentIds) && state.activeSegmentIds.length) return state.activeSegmentIds;
-  return state.activeSegmentId ? [state.activeSegmentId] : [];
+  const id = Array.isArray(state.activeSegmentIds) && state.activeSegmentIds.length
+    ? state.activeSegmentIds.find(Boolean)
+    : state.activeSegmentId;
+  return id ? [id] : [];
+}
+
+function setActiveReachIds(ids) {
+  const id = Array.isArray(ids) ? ids.find(Boolean) : ids;
+  state.activeSegmentId = id ?? null;
+  state.activeSegmentIds = id ? [id] : [];
 }
 
 function clearTemporaryDrawingState() {
@@ -1107,8 +1115,7 @@ function openWatercourse(name, saveCurrent = true) {
     setSelectedReferenceLineIds(payload.selectedReferenceLineIds ?? (payload.selectedReferenceLineId ? [payload.selectedReferenceLineId] : []));
     state.mappingStarted = Boolean(payload.mappingStarted || payload.activeSection);
     if (state.mappingStarted) {
-      state.activeSegmentId = payload.activeSegmentId ?? null;
-      state.activeSegmentIds = payload.activeSegmentIds ?? (payload.activeSegmentId ? [payload.activeSegmentId] : []);
+      setActiveReachIds(payload.activeSegmentIds ?? payload.activeSegmentId);
       state.activeReachGeometry = normalizePoints(payload.activeReachGeometry ?? []);
       if (state.activeReachGeometry.length < 2) {
         state.activeReachGeometry = selectedReferenceLines().length ? combinedReferenceLinePoints(selectedReferenceLines()) : [];
@@ -1116,8 +1123,7 @@ function openWatercourse(name, saveCurrent = true) {
       state.draftFieldReach = state.activeReachGeometry;
       state.reachWorkflowState = payload.reachWorkflowState ?? "reach_started";
     } else {
-      state.activeSegmentId = null;
-      state.activeSegmentIds = [];
+      setActiveReachIds([]);
       state.activeReachGeometry = [];
       state.draftFieldReach = selectedReferenceLines().length ? combinedReferenceLinePoints(selectedReferenceLines()) : [];
       state.reachWorkflowState = state.draftFieldReach.length > 1 ? "watercourse_selected" : "idle";
@@ -1286,7 +1292,7 @@ function selectedReferenceLineIds() {
 }
 
 function setSelectedReferenceLineIds(ids) {
-  const uniqueIds = [...new Set(ids)].filter(Boolean);
+  const uniqueIds = [...new Set(ids)].filter(Boolean).slice(0, 1);
   state.selectedReferenceLineIds = uniqueIds;
   state.selectedReferenceLineId = uniqueIds[0] ?? null;
 }
@@ -1295,8 +1301,7 @@ function setActiveReachFromSelectedLines() {
   const ids = selectedReferenceLineIds();
   const lines = selectedReferenceLines();
   const geometry = lines.length ? combinedReferenceLinePoints(lines) : [];
-  state.activeSegmentIds = ids;
-  state.activeSegmentId = ids[0] ?? null;
+  setActiveReachIds(ids);
   state.activeReachGeometry = geometry;
   state.reachWorkflowState = geometry.length > 1 ? "watercourse_selected" : "idle";
   console.info("[InField reach] Aktiv sträcka vald.", {
@@ -1311,8 +1316,7 @@ function previewSelectedReferenceLines() {
   const lines = selectedReferenceLines();
   const geometry = lines.length ? combinedReferenceLinePoints(lines) : [];
   state.draftFieldReach = geometry;
-  state.activeSegmentId = null;
-  state.activeSegmentIds = [];
+  setActiveReachIds([]);
   state.activeReachGeometry = [];
   state.reachWorkflowState = geometry.length > 1 ? "watercourse_selected" : "idle";
   console.info("[InField reach] Stödlinje vald som kandidat.", {
@@ -1325,8 +1329,7 @@ function previewSelectedReferenceLines() {
 }
 
 function clearActiveReachLock(options = {}) {
-  state.activeSegmentId = null;
-  state.activeSegmentIds = [];
+  setActiveReachIds([]);
   state.activeReachGeometry = [];
   state.reachWorkflowState = "idle";
   if (options.clearSelection) setSelectedReferenceLineIds([]);
@@ -1356,7 +1359,7 @@ function toggleReferenceLineSelection(id) {
     return;
   }
   const ids = selectedReferenceLineIds();
-  setSelectedReferenceLineIds(ids.includes(id) ? ids.filter((item) => item !== id) : [...ids, id]);
+  setSelectedReferenceLineIds(ids.includes(id) ? [] : [id]);
   clearTemporaryDrawingState();
   activateSelectedReferenceLines({ fit: true });
 }
@@ -1374,7 +1377,7 @@ function activateSelectedReferenceLines(options = {}) {
   fieldStatusLabel.textContent = "Stödlinje redo";
   mapHint.textContent = lines.length === 1
     ? "Stödlinje vald. Tryck Starta kartering för att låsa den."
-    : `${lines.length} stödlinjer är valda. Tryck Starta kartering för att låsa dem.`;
+    : "Välj en stödlinje innan du startar kartering.";
   sideMapHint.textContent = mapHint.textContent;
   if (options.fit && state.draftFieldReach.length > 1) fitMapToPoints(state.draftFieldReach);
 }
@@ -1560,6 +1563,7 @@ function finishSection() {
   state.sections.push(state.activeSection);
   state.activeSection = null;
   state.reachWorkflowState = state.mappingStarted ? "saved" : "idle";
+  setTool("pan");
   restoreMapInteractions();
   saveProject();
   render();
@@ -2253,8 +2257,8 @@ function renderLists() {
     ? state.mappingStarted && activeReachIds().length
       ? `Aktiv sträcka låst: ${activeReachIds().join(", ")}`
       : selectedLines.length
-      ? `${selectedLines.length} stödlinje${selectedLines.length === 1 ? "" : "r"} aktiv${selectedLines.length === 1 ? "" : "a"}`
-      : `${state.referenceLines.length} linje${state.referenceLines.length === 1 ? "" : "r"} hittad${state.referenceLines.length === 1 ? "" : "e"}. Välj en eller flera i listan.`
+      ? "1 stödlinje vald"
+      : `${state.referenceLines.length} linje${state.referenceLines.length === 1 ? "" : "r"} hittad${state.referenceLines.length === 1 ? "" : "e"}. Välj en i listan.`
     : "Ingen stödlinje importerad.";
   state.referenceLines
     .slice()
@@ -2579,6 +2583,7 @@ function addReferenceLines(lines, source = "", options = {}) {
   }
   state.referenceLines.push(...cleanLines);
   state.draftFieldReach = [];
+  setActiveReachIds([]);
   clearTemporaryDrawingState();
   const autoSelectIds = Array.isArray(options.autoSelect)
     ? options.autoSelect
@@ -3025,7 +3030,7 @@ async function fetchOsmWaterwaysInView() {
     addReferenceLines(lines, "OpenStreetMap Overpass", { fit: false, replaceExisting: true });
     const types = [...new Set(lines.map((line) => line.properties?.waterway).filter(Boolean))].join(", ");
     if (lines.length) {
-      referenceLineStatus.textContent = `${lines.length} OSM-linje${lines.length === 1 ? "" : "r"} hämtade${types ? ` (${types})` : ""}. Välj en eller flera i listan.`;
+      referenceLineStatus.textContent = `${lines.length} OSM-linje${lines.length === 1 ? "" : "r"} hämtade${types ? ` (${types})` : ""}. Välj en i listan.`;
     }
   } catch (error) {
     console.warn("[InField OSM fetch] Hämtningen misslyckades.", error);
@@ -3095,15 +3100,18 @@ function startMapping() {
     return;
   }
   const selectedLines = selectedReferenceLines();
-  if (selectedLines.length) {
+  if (selectedLines.length > 1) {
+    fieldStatusLabel.textContent = "Välj bara en stödlinje åt gången.";
+    setSelectedReferenceLineIds([selectedLines[0].id]);
+    return;
+  }
+  if (selectedLines.length === 1) {
     state.draftFieldReach = combinedReferenceLinePoints(selectedLines);
     state.activeReachGeometry = [...state.draftFieldReach];
-    state.activeSegmentIds = selectedReferenceLineIds();
-    state.activeSegmentId = state.activeSegmentIds[0] ?? null;
+    setActiveReachIds(selectedReferenceLineIds());
   } else {
     state.activeReachGeometry = [...state.draftFieldReach];
-    state.activeSegmentIds = [];
-    state.activeSegmentId = null;
+    setActiveReachIds([]);
   }
   if (state.draftFieldReach.length < 2) {
     fieldStatusLabel.textContent = "Välj eller rita en stödlinje först";
