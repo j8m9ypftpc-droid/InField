@@ -19,6 +19,9 @@
 const LANTMATERIET_TOKEN_KEY = "infield:lantmateriet-token";
 const BASEMAP_KEY = "infield:basemap";
 const THEME_KEY = "infield:theme";
+const MAP_VIEW_FETCH_PADDING = 0.3;
+const MAP_VIEW_SETTLE_MS = 300;
+const LANTMATERIET_WATERCOURSE_PAGE_SIZE = 10000;
 const LANTMATERIET_WATERCOURSE_URL =
   "https://api.lantmateriet.se/ogc-features/v1/hydrografi/collections/WatercourseLine/items";
 const LANTMATERIET_ATTRIBUTION = "Hydrografi Direkt © Lantmäteriet, bearbetad, CC BY 4.0";
@@ -2211,18 +2214,38 @@ function clearLantmaterietToken() {
   setBaseMap("osm");
 }
 
-function mapBoundsParams(limit = 1000) {
-  const bounds = state.backgroundMap.getBounds();
+function wait(ms) {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+}
+
+async function currentMapViewBounds(padding = MAP_VIEW_FETCH_PADDING) {
+  state.backgroundMap.invalidateSize();
+  await wait(MAP_VIEW_SETTLE_MS);
+  const bounds = state.backgroundMap.getBounds().pad(padding);
   const south = Number(bounds.getSouth().toFixed(7));
   const west = Number(bounds.getWest().toFixed(7));
   const north = Number(bounds.getNorth().toFixed(7));
   const east = Number(bounds.getEast().toFixed(7));
+  return {
+    bounds,
+    south,
+    west,
+    north,
+    east,
+    span: Math.max(Math.abs(north - south), Math.abs(east - west)),
+  };
+}
+
+async function mapBoundsParams(limit = LANTMATERIET_WATERCOURSE_PAGE_SIZE) {
+  const { south, west, north, east, span } = await currentMapViewBounds();
   const params = new URLSearchParams({
     bbox: `${west},${south},${east},${north}`,
     limit: String(limit),
     f: "json",
   });
-  return { params, span: Math.max(Math.abs(north - south), Math.abs(east - west)) };
+  return { params, span };
 }
 
 async function fetchLantmaterietJson(params, token) {
@@ -2253,6 +2276,39 @@ async function fetchLantmaterietJson(params, token) {
   return fallbackResponse.json();
 }
 
+async function fetchAllLantmaterietJson(params, token) {
+  const offset = Number(params.get("offset") || 0);
+  const firstParams = new URLSearchParams(params);
+  firstParams.set("offset", String(offset));
+  const firstPage = await fetchLantmaterietJson(firstParams, token);
+  if (firstPage.type !== "FeatureCollection") return firstPage;
+
+  const features = [...(firstPage.features ?? [])];
+  const matchedValue = Number(firstPage.numberMatched);
+  const numberMatched = Number.isFinite(matchedValue) ? matchedValue : null;
+  let lastReturned = Number(firstPage.numberReturned ?? firstPage.features?.length ?? 0);
+  let nextOffset = offset + lastReturned;
+
+  while (numberMatched !== null && nextOffset < numberMatched && lastReturned > 0) {
+    referenceLineStatus.textContent = `Hämtar Lantmäteriet-linjer i kartvyn... ${features.length} av ${numberMatched}`;
+    const pageParams = new URLSearchParams(params);
+    pageParams.set("offset", String(nextOffset));
+    const page = await fetchLantmaterietJson(pageParams, token);
+    const pageFeatures = page.features ?? [];
+    if (!pageFeatures.length) break;
+    features.push(...pageFeatures);
+    lastReturned = Number(page.numberReturned ?? pageFeatures.length);
+    nextOffset += lastReturned;
+  }
+
+  return {
+    ...firstPage,
+    features,
+    numberReturned: features.length,
+    numberMatched: numberMatched ?? features.length,
+  };
+}
+
 async function fetchLantmaterietWaterwaysInView(testOnly = false) {
   if (!state.backgroundMap) return;
   const token = (lantmaterietTokenInput?.value.trim() || savedLantmaterietToken()).trim();
@@ -2262,12 +2318,12 @@ async function fetchLantmaterietWaterwaysInView(testOnly = false) {
     return;
   }
 
-  const { params, span } = mapBoundsParams(testOnly ? 1 : 1000);
+  const { params, span } = await mapBoundsParams(testOnly ? 1 : LANTMATERIET_WATERCOURSE_PAGE_SIZE);
   if (!testOnly && span > 0.25 && !window.confirm("Kartvyn är ganska stor. Zooma helst in på din arbetsplats. Vill du hämta ändå?")) return;
 
   referenceLineStatus.textContent = testOnly ? "Testar åtkomst till Lantmäteriet..." : "Hämtar Lantmäteriet-linjer i kartvyn...";
   try {
-    const data = await fetchLantmaterietJson(params, token);
+    const data = testOnly ? await fetchLantmaterietJson(params, token) : await fetchAllLantmaterietJson(params, token);
     if (testOnly) {
       referenceLineStatus.textContent = "Åtkomst till Lantmäteriet fungerar.";
       return;
@@ -2295,12 +2351,7 @@ function osmWaterwayName(tags = {}, index) {
 
 async function fetchOsmWaterwaysInView() {
   if (!state.backgroundMap) return;
-  const bounds = state.backgroundMap.getBounds();
-  const south = bounds.getSouth();
-  const west = bounds.getWest();
-  const north = bounds.getNorth();
-  const east = bounds.getEast();
-  const span = Math.max(Math.abs(north - south), Math.abs(east - west));
+  const { south, west, north, east, span } = await currentMapViewBounds();
   if (span > 0.25 && !window.confirm("Kartvyn är ganska stor. Det kan bli mycket data. Vill du hämta ändå?")) return;
 
   referenceLineStatus.textContent = "Hämtar vattendragslinjer i kartvyn...";
