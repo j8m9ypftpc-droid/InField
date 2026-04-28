@@ -21,6 +21,7 @@ const BASEMAP_KEY = "infield:basemap";
 const THEME_KEY = "infield:theme";
 const MAP_VIEW_FETCH_PADDING = 0.3;
 const MAP_VIEW_SETTLE_MS = 300;
+const DEBUG_LOG_LIMIT = 80;
 const LANTMATERIET_WATERCOURSE_PAGE_SIZE = 10000;
 const LANTMATERIET_WATERCOURSE_URL =
   "https://api.lantmateriet.se/ogc-features/v1/hydrografi/collections/WatercourseLine/items";
@@ -314,6 +315,7 @@ const mapHint = document.querySelector("#map-hint");
 const sideMapHint = document.querySelector("#side-map-hint");
 const lengthLabel = document.querySelector("#length-label");
 const gpsToggleButton = document.querySelector("#gps-toggle-button");
+const debugLogButton = document.querySelector("#debug-log-button");
 const centerGpsButton = document.querySelector("#center-gps-button");
 const switchProjectButton = document.querySelector("#switch-project-button");
 const protocolFields = document.querySelector("#protocol-fields");
@@ -371,6 +373,124 @@ const exportDownloadButton = document.querySelector("#export-download-button");
 state.watercourse = "Bresiljeån";
 state.selectedObjectId = null;
 state.projectMeta = { inventor: "" };
+
+const debugLogEntries = [];
+let debugLogCopyTimer = null;
+const nativeConsole = {
+  info: console.info.bind(console),
+  warn: console.warn.bind(console),
+  error: console.error.bind(console),
+};
+
+function redactDebugText(text) {
+  return String(text)
+    .replace(/(access_token=)[^&\s]+/gi, "$1[redacted]")
+    .replace(/(authorization["':\s]+)(bearer|basic)?\s*[^,\n}\]]+/gi, "$1[redacted]")
+    .replace(/(token["':\s]+)[^,\n}\]]+/gi, "$1[redacted]");
+}
+
+function debugValueToText(value) {
+  if (value instanceof Error) return `${value.name}: ${value.message}${value.stack ? `\n${value.stack}` : ""}`;
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch (error) {
+    return String(value);
+  }
+}
+
+function renderDebugLogButton() {
+  if (!debugLogButton) return;
+  const errors = debugLogEntries.filter((entry) => entry.level === "error" || entry.level === "warn").length;
+  debugLogButton.classList.toggle("hidden", debugLogEntries.length === 0);
+  debugLogButton.classList.toggle("has-errors", errors > 0);
+  if (!debugLogButton.classList.contains("copied")) {
+    debugLogButton.textContent = errors > 0 ? `Bugglogg ${errors}` : `Bugglogg ${debugLogEntries.length}`;
+  }
+  debugLogButton.title = "Tryck för att kopiera felsökningsloggen.";
+}
+
+function addDebugLog(level, values) {
+  const entry = {
+    time: new Date().toISOString(),
+    level,
+    message: redactDebugText(values.map(debugValueToText).join(" ")),
+  };
+  debugLogEntries.push(entry);
+  if (debugLogEntries.length > DEBUG_LOG_LIMIT) debugLogEntries.splice(0, debugLogEntries.length - DEBUG_LOG_LIMIT);
+  renderDebugLogButton();
+}
+
+function debugLogText() {
+  return debugLogEntries
+    .map((entry) => `[${entry.time}] [${entry.level.toUpperCase()}]\n${entry.message}`)
+    .join("\n\n");
+}
+
+async function copyDebugLog() {
+  if (!debugLogEntries.length) return;
+  const text = debugLogText();
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+    } else {
+      const textarea = document.createElement("textarea");
+      textarea.value = text;
+      textarea.setAttribute("readonly", "");
+      textarea.style.position = "fixed";
+      textarea.style.opacity = "0";
+      document.body.append(textarea);
+      textarea.select();
+      document.execCommand("copy");
+      textarea.remove();
+    }
+    debugLogButton?.classList.add("copied");
+    if (debugLogButton) debugLogButton.textContent = "Kopierad";
+    window.clearTimeout(debugLogCopyTimer);
+    debugLogCopyTimer = window.setTimeout(() => {
+      debugLogButton?.classList.remove("copied");
+      renderDebugLogButton();
+    }, 1600);
+  } catch (error) {
+    nativeConsole.warn("[InField debug log] Kunde inte kopiera buggloggen.", error);
+    addDebugLog("warn", ["Kunde inte kopiera buggloggen automatiskt.", error]);
+  }
+}
+
+function installDebugLogCapture() {
+  console.warn = (...values) => {
+    nativeConsole.warn(...values);
+    addDebugLog("warn", values);
+  };
+  console.error = (...values) => {
+    nativeConsole.error(...values);
+    addDebugLog("error", values);
+  };
+  console.info = (...values) => {
+    nativeConsole.info(...values);
+    const marker = String(values[0] ?? "");
+    if (
+      marker.includes("[InField OSM") ||
+      marker.includes("[InField basemap") ||
+      marker.includes("[InField reach]") ||
+      marker.includes("[InField map]")
+    ) {
+      addDebugLog("info", values);
+    }
+  };
+  window.addEventListener("error", (event) => {
+    addDebugLog("error", [
+      event.message || "JavaScript-fel",
+      `${event.filename || "okänd fil"}:${event.lineno || 0}:${event.colno || 0}`,
+      event.error,
+    ]);
+  });
+  window.addEventListener("unhandledrejection", (event) => {
+    addDebugLog("error", ["Ohanterat fel i bakgrunden", event.reason]);
+  });
+}
+
+installDebugLogCapture();
 
 function pathFromPoints(points) {
   return points.map((p, index) => `${index === 0 ? "M" : "L"}${p[0]},${p[1]}`).join(" ");
@@ -3258,6 +3378,7 @@ toolMenuButton.addEventListener("click", () => {
 mapZoomInButton.addEventListener("click", () => state.backgroundMap?.zoomIn());
 mapZoomOutButton.addEventListener("click", () => state.backgroundMap?.zoomOut());
 basemapSelect?.addEventListener("change", () => setBaseMap(basemapSelect.value));
+debugLogButton?.addEventListener("click", copyDebugLog);
 themeToggleButton?.addEventListener("click", () => {
   const isDark = document.documentElement.dataset.theme === "dark";
   setTheme(isDark ? "light" : "dark");

@@ -125,10 +125,13 @@
             <h1>Delsträcka <span id="section-number">1</span></h1>
           </div>
           <div class="header-actions">
-            <button id="gps-toggle-button" class="switch-control" type="button" aria-pressed="false">
-              <span class="switch-track"><span class="switch-thumb"></span></span>
-              <span class="switch-label">GPS</span>
-            </button>
+            <div class="gps-debug-stack">
+              <button id="gps-toggle-button" class="switch-control" type="button" aria-pressed="false">
+                <span class="switch-track"><span class="switch-thumb"></span></span>
+                <span class="switch-label">GPS</span>
+              </button>
+              <button id="debug-log-button" class="debug-log-button hidden" type="button" aria-live="polite">Bugglogg</button>
+            </div>
             <button id="center-gps-button" class="quiet-button">Centrera</button>
             <label class="basemap-control header-basemap-control" for="basemap-select">
               <span>Baskarta</span>

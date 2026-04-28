@@ -478,6 +478,13 @@ input {
   justify-content: flex-end;
 }
 
+.gps-debug-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: stretch;
+}
+
 .switch-control {
   height: 38px;
   display: inline-flex;
@@ -525,6 +532,28 @@ input {
 .switch-label {
   font-weight: 700;
   font-size: 14px;
+}
+
+.debug-log-button {
+  min-height: 28px;
+  padding: 4px 9px;
+  border: 1px solid rgba(245, 158, 11, 0.55);
+  border-radius: 8px;
+  background: rgba(245, 158, 11, 0.16);
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.debug-log-button.has-errors {
+  border-color: rgba(248, 113, 113, 0.75);
+  background: rgba(248, 113, 113, 0.2);
+}
+
+.debug-log-button.copied {
+  border-color: rgba(52, 211, 153, 0.75);
+  background: rgba(52, 211, 153, 0.2);
 }
 
 .switch-button {
