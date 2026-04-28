@@ -473,7 +473,11 @@ function installDebugLogCapture() {
       marker.includes("[InField OSM") ||
       marker.includes("[InField basemap") ||
       marker.includes("[InField reach]") ||
-      marker.includes("[InField map]")
+      marker.includes("[InField map]") ||
+      marker.includes("[Reach]") ||
+      marker.includes("[Map]") ||
+      marker.includes("[State]") ||
+      marker.includes("[Export]")
     ) {
       addDebugLog("info", values);
     }
