@@ -22,12 +22,14 @@ const THEME_KEY = "infield:theme";
 const MAP_VIEW_FETCH_PADDING = 0.3;
 const MAP_VIEW_SETTLE_MS = 300;
 const DEBUG_LOG_LIMIT = 80;
+const MAP_MUTATION_GUARD_MS = 450;
 const LANTMATERIET_WATERCOURSE_PAGE_SIZE = 10000;
 const LANTMATERIET_WATERCOURSE_URL =
   "https://api.lantmateriet.se/ogc-features/v1/hydrografi/collections/WatercourseLine/items";
 const LANTMATERIET_ATTRIBUTION = "Hydrografi Direkt © Lantmäteriet, bearbetad, CC BY 4.0";
 const LANTMATERIET_WMTS_ATTRIBUTION = "Topografisk webbkarta © Lantmäteriet";
 const OSM_WATERWAY_PATTERN = "^(river|stream|ditch|drain|canal)$";
+let lastMapMutation = { action: "", time: 0 };
 const LANTMATERIET_WMTS_OPTIONS = {
   minZoom: 0,
   maxZoom: 14,
@@ -284,6 +286,7 @@ const state = {
   mapOffset: [0, 0],
   useSupportLine: false,
   baseMapLayer: null,
+  lastReferenceRenderSignature: "",
 };
 
 const map = document.querySelector("#map");
@@ -809,11 +812,17 @@ function attachBaseMapDiagnostics(layer, baseMapId) {
   let errorCount = 0;
   layer.on?.("tileerror", (event) => {
     errorCount += 1;
-    logTileError(baseMapId, event);
+    if (errorCount <= 3) logTileError(baseMapId, event);
     if (errorCount === 4 && basemapSelect?.value === baseMapId) {
       const warning = "LM-kartan kunde inte laddas helt. Kontrollera nätverk eller välj annan baskarta.";
       mapHint.textContent = warning;
       sideMapHint.textContent = warning;
+      console.warn("[InField basemap tile warning]", {
+        baseMapId,
+        label: baseMaps[baseMapId]?.label ?? baseMapId,
+        message: warning,
+        suppressedTileErrorsAfter: 3,
+      });
     }
   });
   layer.on?.("tileloadstart", (event) => {
@@ -1096,15 +1105,23 @@ function openWatercourse(name, saveCurrent = true) {
     state.fieldPackages = (payload.fieldPackages ?? []).map(normalizeFieldPackage);
     state.referenceLines = (payload.referenceLines ?? []).map(normalizeReferenceLine);
     setSelectedReferenceLineIds(payload.selectedReferenceLineIds ?? (payload.selectedReferenceLineId ? [payload.selectedReferenceLineId] : []));
-    state.mappingStarted = Boolean(payload.mappingStarted || (payload.sections?.length ?? 0) > 0 || payload.activeSection);
-    state.activeSegmentId = payload.activeSegmentId ?? null;
-    state.activeSegmentIds = payload.activeSegmentIds ?? (payload.activeSegmentId ? [payload.activeSegmentId] : []);
-    state.activeReachGeometry = normalizePoints(payload.activeReachGeometry ?? []);
-    if (state.mappingStarted && state.activeReachGeometry.length < 2) {
-      state.activeReachGeometry = selectedReferenceLines().length ? combinedReferenceLinePoints(selectedReferenceLines()) : [];
+    state.mappingStarted = Boolean(payload.mappingStarted || payload.activeSection);
+    if (state.mappingStarted) {
+      state.activeSegmentId = payload.activeSegmentId ?? null;
+      state.activeSegmentIds = payload.activeSegmentIds ?? (payload.activeSegmentId ? [payload.activeSegmentId] : []);
+      state.activeReachGeometry = normalizePoints(payload.activeReachGeometry ?? []);
+      if (state.activeReachGeometry.length < 2) {
+        state.activeReachGeometry = selectedReferenceLines().length ? combinedReferenceLinePoints(selectedReferenceLines()) : [];
+      }
+      state.draftFieldReach = state.activeReachGeometry;
+      state.reachWorkflowState = payload.reachWorkflowState ?? "reach_started";
+    } else {
+      state.activeSegmentId = null;
+      state.activeSegmentIds = [];
+      state.activeReachGeometry = [];
+      state.draftFieldReach = selectedReferenceLines().length ? combinedReferenceLinePoints(selectedReferenceLines()) : [];
+      state.reachWorkflowState = state.draftFieldReach.length > 1 ? "watercourse_selected" : "idle";
     }
-    state.draftFieldReach = state.mappingStarted ? state.activeReachGeometry : [];
-    state.reachWorkflowState = payload.reachWorkflowState ?? (state.mappingStarted ? "reach_started" : state.activeReachGeometry.length > 1 ? "watercourse_selected" : "idle");
     state.projectMeta = { ...defaultProjectMeta(), ...(payload.projectMeta ?? {}) };
     syncProjectMetaToForm();
     syncProjectChoices();
@@ -1242,14 +1259,19 @@ function safeReferenceLineName(line, fallback = "Namnlös vattendragslinje") {
 function normalizeReferenceLine(line) {
   const properties = line.properties ?? {};
   const displayName = safeReferenceLineName({ ...line, properties });
+  const points = normalizePoints(line.points ?? []);
   return {
     id: line.id ?? crypto.randomUUID(),
     name: displayName,
     displayName,
     source: line.source ?? "",
     license: line.license ?? "",
+    osmId: line.osmId ?? properties.osmId ?? "",
+    typeLabel: line.typeLabel ?? properties.typeLabel ?? "",
+    waterway: line.waterway ?? properties.waterway ?? "",
+    pointCount: points.length,
     properties,
-    points: normalizePoints(line.points ?? []),
+    points,
   };
 }
 
@@ -1281,6 +1303,23 @@ function setActiveReachFromSelectedLines() {
     activeSegmentId: state.activeSegmentId,
     activeSegmentIds: state.activeSegmentIds,
     points: state.activeReachGeometry.length,
+  });
+  return geometry;
+}
+
+function previewSelectedReferenceLines() {
+  const lines = selectedReferenceLines();
+  const geometry = lines.length ? combinedReferenceLinePoints(lines) : [];
+  state.draftFieldReach = geometry;
+  state.activeSegmentId = null;
+  state.activeSegmentIds = [];
+  state.activeReachGeometry = [];
+  state.reachWorkflowState = geometry.length > 1 ? "watercourse_selected" : "idle";
+  console.info("[InField reach] Stödlinje vald som kandidat.", {
+    selectedSupportLines: selectedReferenceLineIds(),
+    activeSegmentId: state.activeSegmentId,
+    activeSegmentIds: state.activeSegmentIds,
+    points: geometry.length,
   });
   return geometry;
 }
@@ -1324,7 +1363,7 @@ function toggleReferenceLineSelection(id) {
 
 function activateSelectedReferenceLines(options = {}) {
   const lines = selectedReferenceLines();
-  state.draftFieldReach = setActiveReachFromSelectedLines();
+  previewSelectedReferenceLines();
   if (!lines.length) {
     clearActiveReachLock();
     fieldStatusLabel.textContent = "Ingen stödlinje vald";
@@ -1334,8 +1373,8 @@ function activateSelectedReferenceLines(options = {}) {
   }
   fieldStatusLabel.textContent = "Stödlinje redo";
   mapHint.textContent = lines.length === 1
-    ? "Vald stödlinje är aktiv. Starta kartering eller välj start/stopp längs linjen."
-    : `${lines.length} stödlinjer är aktiva och används som en sammanhängande stödlinje.`;
+    ? "Stödlinje vald. Tryck Starta kartering för att låsa den."
+    : `${lines.length} stödlinjer är valda. Tryck Starta kartering för att låsa dem.`;
   sideMapHint.textContent = mapHint.textContent;
   if (options.fit && state.draftFieldReach.length > 1) fitMapToPoints(state.draftFieldReach);
 }
@@ -1377,6 +1416,43 @@ function mapInteractionState() {
   };
 }
 
+function restoreMapInteractions() {
+  setMapInteractionsEnabled(true);
+}
+
+function stopLeafletEvent(event) {
+  if (!window.L) return;
+  if (event?.originalEvent) {
+    event.originalEvent._infieldHandled = true;
+    window.L.DomEvent.stop(event.originalEvent);
+  }
+  window.L.DomEvent.stopPropagation(event);
+}
+
+function currentReachInputState() {
+  if (!state.activeSection) return "no_active_section";
+  if (!state.activeSection.startConfirmed) {
+    return state.activeSection.points.length ? "waiting_for_start_confirm" : "waiting_for_start";
+  }
+  if (state.activeSection.points.length < 2) return "waiting_for_end";
+  return "ready_to_save";
+}
+
+function shouldIgnoreRepeatedMapMutation(action) {
+  const now = performance.now();
+  const isRepeat = lastMapMutation.action === action && now - lastMapMutation.time < MAP_MUTATION_GUARD_MS;
+  lastMapMutation = { action, time: now };
+  if (isRepeat) {
+    console.warn("[InField map] Dubbel kartinteraktion ignorerad.", {
+      action,
+      guardMs: MAP_MUTATION_GUARD_MS,
+      currentReachState: currentReachInputState(),
+      activeSegmentId: state.activeSegmentId,
+    });
+  }
+  return isRepeat;
+}
+
 function restoreMapView(snapshot) {
   if (!state.backgroundMap || !snapshot) return;
   const center = state.backgroundMap.getCenter();
@@ -1388,7 +1464,7 @@ function restoreMapView(snapshot) {
     });
     state.backgroundMap.setView(snapshot.center, snapshot.zoom, { animate: false });
   }
-  setMapInteractionsEnabled(true);
+  restoreMapInteractions();
   console.info("[InField map] Kartinteraktion efter objektplacering.", mapInteractionState());
 }
 
@@ -1405,7 +1481,7 @@ function setTool(tool) {
   map.classList.toggle("pan-active", tool === "pan");
   map.style.pointerEvents = state.backgroundMap ? "none" : tool === "pan" ? "none" : "auto";
   if (state.backgroundMap) {
-    setMapInteractionsEnabled(tool === "pan");
+    setMapInteractionsEnabled(true);
   }
   mapToolbar.classList.add("collapsed");
   toolMenuButton.setAttribute("aria-expanded", "false");
@@ -1451,6 +1527,7 @@ function createSection() {
     attributes: defaultProtocolAttributes(),
   };
   state.nextSectionNumber += 1;
+  state.reachWorkflowState = startPoint ? "waiting_for_start_confirm" : "waiting_for_start";
   syncProtocolToForm();
   setTool("section");
   render();
@@ -1482,6 +1559,8 @@ function finishSection() {
   state.activeSection.startConfirmed = true;
   state.sections.push(state.activeSection);
   state.activeSection = null;
+  state.reachWorkflowState = state.mappingStarted ? "saved" : "idle";
+  restoreMapInteractions();
   saveProject();
   render();
 }
@@ -1489,6 +1568,7 @@ function finishSection() {
 function confirmSectionStart() {
   if (!state.activeSection || state.activeSection.points.length < 1) return;
   state.activeSection.startConfirmed = true;
+  state.reachWorkflowState = "waiting_for_end";
   saveProject();
   render();
 }
@@ -1829,6 +1909,7 @@ function renderSections() {
           weight: 3,
           fillColor: "#1f9d55",
           fillOpacity: 1,
+          bubblingMouseEvents: false,
         }).addTo(state.leafletLayers.sections);
       }
       return;
@@ -1838,6 +1919,7 @@ function renderSections() {
         color: section.status === "drawing" ? "#111827" : "#b84a3a",
         weight: section.status === "drawing" ? 7 : 8,
         opacity: 0.95,
+        bubblingMouseEvents: false,
       }).addTo(state.leafletLayers.sections);
       window.L.circleMarker(toLatLng(section.points[0]), {
         radius: 8,
@@ -1845,6 +1927,7 @@ function renderSections() {
         weight: 3,
         fillColor: "#1f9d55",
         fillOpacity: 1,
+        bubblingMouseEvents: false,
       }).addTo(state.leafletLayers.sections);
       window.L.circleMarker(toLatLng(section.points.at(-1)), {
         radius: 8,
@@ -1852,6 +1935,7 @@ function renderSections() {
         weight: 3,
         fillColor: "#d7332f",
         fillOpacity: 1,
+        bubblingMouseEvents: false,
       }).addTo(state.leafletLayers.sections);
       return;
     }
@@ -1874,6 +1958,7 @@ function renderFieldPackages() {
   fieldLayer.innerHTML = "";
   state.leafletLayers?.references?.clearLayers();
   state.leafletLayers?.field?.clearLayers();
+  let renderedReferenceLayers = 0;
   state.referenceLines.forEach((line) => {
     if (line.points.length < 2) return;
     const selected = isReferenceLineSelected(line);
@@ -1883,39 +1968,81 @@ function renderFieldPackages() {
         weight: selected ? 6 : 4,
         opacity: selected ? 0.95 : 0.65,
         dashArray: selected ? null : "8 8",
+        bubblingMouseEvents: false,
       }).addTo(state.leafletLayers.references);
+      renderedReferenceLayers += 1;
       layer.on("click", (event) => {
-        window.L.DomEvent.stopPropagation(event);
+        stopLeafletEvent(event);
         if (state.mappingStarted) {
           console.warn("[InField reach] Klick på stödlinje ignoreras under aktiv kartering.", {
             ignoredSegmentId: line.id,
             activeSegmentId: state.activeSegmentId,
             activeSegmentIds: activeReachIds(),
+            eventType: event?.originalEvent?.type ?? event?.type ?? "click",
           });
           referenceLineStatus.textContent = "Kartering är startad. Byt vattendrag för att välja annan stödlinje.";
           return;
         }
         toggleReferenceLineSelection(line.id);
         const lineName = safeReferenceLineName(line);
-        referenceLineStatus.textContent = isReferenceLineSelected(line) ? `Aktiv stödlinje: ${lineName}` : `Avmarkerad stödlinje: ${lineName}`;
+        referenceLineStatus.textContent = isReferenceLineSelected(line) ? `Vald stödlinje: ${lineName}` : `Avmarkerad stödlinje: ${lineName}`;
         saveProject();
         render();
       });
+    } else {
+      renderedReferenceLayers += 1;
     }
   });
+  const renderSignature = JSON.stringify({
+    candidateLines: state.referenceLines.length,
+    selectedSupportLines: selectedReferenceLineIds(),
+    activeSegmentIds: activeReachIds(),
+    renderedReferenceLayers,
+    draftReachPoints: state.draftFieldReach.length,
+    mappingStarted: state.mappingStarted,
+  });
+  if (renderSignature !== state.lastReferenceRenderSignature) {
+    state.lastReferenceRenderSignature = renderSignature;
+    console.info("[Map] Stödlinjer renderade.", {
+      candidateLines: state.referenceLines.length,
+      selectedSupportLines: selectedReferenceLineIds(),
+      activeSegmentIds: activeReachIds(),
+      renderedLayers: {
+        references: renderedReferenceLayers,
+        draftReachPoints: state.draftFieldReach.length,
+      },
+    });
+  }
   if (!state.mappingStarted && state.draftFieldReach.length) {
     if (state.leafletLayers?.field && window.L) {
       if (state.draftFieldReach.length > 1) {
-        window.L.polyline(toLatLngs(state.draftFieldReach), { color: "#2563eb", weight: 5 }).addTo(state.leafletLayers.field);
+        window.L.polyline(toLatLngs(state.draftFieldReach), { color: "#2563eb", weight: 5, bubblingMouseEvents: false }).addTo(state.leafletLayers.field);
       }
-      state.draftFieldReach.forEach((point) => {
+      const showDraftVertices = state.tool === "field" && !selectedReferenceLines().length;
+      const draftVertices = showDraftVertices
+        ? state.draftFieldReach
+        : state.draftFieldReach.length > 1
+          ? [state.draftFieldReach[0], state.draftFieldReach.at(-1)]
+          : state.draftFieldReach;
+      draftVertices.forEach((point) => {
         window.L.circleMarker(toLatLng(point), {
           radius: 7,
           color: "#111827",
           weight: 2,
           fillColor: "#ffffff",
           fillOpacity: 1,
+          bubblingMouseEvents: false,
         }).addTo(state.leafletLayers.field);
+      });
+      console.info("[Map] Stödlinjelager renderat.", {
+        candidateLines: state.referenceLines.length,
+        selectedSupportLines: selectedReferenceLineIds(),
+        activeSegmentIds: activeReachIds(),
+        renderedLayers: {
+          references: state.referenceLines.length,
+          draftReachPoints: state.draftFieldReach.length,
+          visibleDraftVertices: draftVertices.length,
+        },
       });
       return;
     }
@@ -1925,7 +2052,13 @@ function renderFieldPackages() {
         class: "field-reach",
       }),
     );
-    state.draftFieldReach.forEach((point) => {
+    const showDraftVertices = state.tool === "field" && !selectedReferenceLines().length;
+    const draftVertices = showDraftVertices
+      ? state.draftFieldReach
+      : state.draftFieldReach.length > 1
+        ? [state.draftFieldReach[0], state.draftFieldReach.at(-1)]
+        : state.draftFieldReach;
+    draftVertices.forEach((point) => {
       fieldLayer.append(makeSvg("circle", { cx: point[0], cy: point[1], r: 8, class: "vertex" }));
     });
   }
@@ -1962,9 +2095,10 @@ function renderObjects() {
           weight: 3,
           fillColor: style.fill,
           fillOpacity: 1,
+          bubblingMouseEvents: false,
         })
           .on("click", (event) => {
-            window.L.DomEvent.stopPropagation(event);
+            stopLeafletEvent(event);
             selectObject(object.id);
           })
           .addTo(state.leafletLayers.objects);
@@ -1973,9 +2107,10 @@ function renderObjects() {
         window.L.polyline(toLatLngs(object.geometry.coordinates), {
           color: style.stroke,
           weight: 5,
+          bubblingMouseEvents: false,
         })
           .on("click", (event) => {
-            window.L.DomEvent.stopPropagation(event);
+            stopLeafletEvent(event);
             selectObject(object.id);
           })
           .addTo(state.leafletLayers.objects);
@@ -1986,9 +2121,10 @@ function renderObjects() {
           weight: 4,
           fillColor: style.fill,
           fillOpacity: 0.3,
+          bubblingMouseEvents: false,
         })
           .on("click", (event) => {
-            window.L.DomEvent.stopPropagation(event);
+            stopLeafletEvent(event);
             selectObject(object.id);
           })
           .addTo(state.leafletLayers.objects);
@@ -2034,7 +2170,7 @@ function renderObjects() {
     if (state.leafletLayers?.objects && window.L) {
       const style = leafletObjectStyle(objectType.value);
       if (state.tempObject.type === "line" && points.length > 1) {
-        window.L.polyline(toLatLngs(points), { color: style.stroke, weight: 5, dashArray: "8 6" }).addTo(state.leafletLayers.objects);
+        window.L.polyline(toLatLngs(points), { color: style.stroke, weight: 5, dashArray: "8 6", bubblingMouseEvents: false }).addTo(state.leafletLayers.objects);
       }
       if (state.tempObject.type === "area" && points.length > 1) {
         window.L.polygon(toLatLngs(points), {
@@ -2043,6 +2179,7 @@ function renderObjects() {
           dashArray: "8 6",
           fillColor: style.fill,
           fillOpacity: 0.2,
+          bubblingMouseEvents: false,
         }).addTo(state.leafletLayers.objects);
       }
       points.forEach((point) => {
@@ -2052,6 +2189,7 @@ function renderObjects() {
           weight: 2,
           fillColor: "#ffffff",
           fillOpacity: 1,
+          bubblingMouseEvents: false,
         }).addTo(state.leafletLayers.objects);
       });
       return;
@@ -2131,8 +2269,8 @@ function renderLists() {
     const lineName = safeReferenceLineName(line);
     li.className = selected ? "selected compact" : "compact";
     const locked = state.mappingStarted;
-    const selectedText = locked && selected ? "Låst aktiv sträcka" : selected ? "Aktiv stödlinje" : "Tryck Välj för att aktivera";
-    li.innerHTML = `<strong>${lineName}</strong><span>${selectedText} · ${formatLength(line.points)} · ${line.points.length} punkter</span><div class="list-actions"><button class="${selected ? "secondary-button" : "quiet-button"}" data-select-reference-line="${line.id}" ${locked ? "disabled" : ""}>${locked && selected ? "Låst" : selected ? "Aktiv" : "Välj"}</button><button class="danger-button" data-delete-reference-line="${line.id}" ${locked ? "disabled" : ""}>Ta bort</button></div>`;
+    const selectedText = locked && selected ? "Låst aktiv sträcka" : selected ? "Vald stödlinje" : "Tryck Välj för att välja";
+    li.innerHTML = `<strong>${lineName}</strong><span>${selectedText} · ${formatLength(line.points)} · ${line.points.length} punkter</span><div class="list-actions"><button class="${selected ? "secondary-button" : "quiet-button"}" data-select-reference-line="${line.id}" ${locked ? "disabled" : ""}>${locked && selected ? "Låst" : selected ? "Vald" : "Välj"}</button><button class="danger-button" data-delete-reference-line="${line.id}" ${locked ? "disabled" : ""}>Ta bort</button></div>`;
     referenceLineList.append(li);
   });
 
@@ -2419,6 +2557,12 @@ function addReferenceLines(lines, source = "", options = {}) {
     referenceLineStatus.textContent = "Kartering är startad. Byt vattendrag för att hämta eller importera nya stödlinjer.";
     return;
   }
+  if (options.replaceExisting) {
+    state.referenceLines = [];
+    state.draftFieldReach = [];
+    clearActiveReachLock({ clearSelection: true });
+    clearTemporaryDrawingState();
+  }
   const cleanLines = lines
     .map((line, index) =>
       normalizeReferenceLine({
@@ -2436,11 +2580,25 @@ function addReferenceLines(lines, source = "", options = {}) {
   state.referenceLines.push(...cleanLines);
   state.draftFieldReach = [];
   clearTemporaryDrawingState();
-  setSelectedReferenceLineIds(options.autoSelect || cleanLines.length === 1 ? [cleanLines[0].id] : []);
+  const autoSelectIds = Array.isArray(options.autoSelect)
+    ? options.autoSelect
+    : options.autoSelect === true
+      ? [cleanLines[0].id]
+      : [];
+  setSelectedReferenceLineIds(autoSelectIds);
   if (selectedReferenceLines().length) activateSelectedReferenceLines({ fit: false });
   referenceLineStatus.textContent = selectedReferenceLines().length
     ? `${cleanLines.length} stödlinje hämtad och aktiverad.`
-    : `${cleanLines.length} stödlinje${cleanLines.length === 1 ? "" : "r"} hämtad${cleanLines.length === 1 ? "" : "e"}. Välj en eller flera i listan.`;
+    : `${cleanLines.length} stödlinje${cleanLines.length === 1 ? "" : "r"} hämtad${cleanLines.length === 1 ? "" : "e"}. Välj i listan innan du startar kartering.`;
+  console.info("[State] Stödlinjer uppdaterade.", {
+    source,
+    fetchedLines: lines.length,
+    addedCandidateLines: cleanLines.length,
+    candidateLines: state.referenceLines.length,
+    selectedSupportLines: selectedReferenceLineIds(),
+    activeSegmentIds: activeReachIds(),
+    replaceExisting: Boolean(options.replaceExisting),
+  });
   if (options.fit !== false) fitMapToPoints(cleanLines[0].points);
   setTool("pan");
   saveProject();
@@ -2689,7 +2847,7 @@ async function fetchLantmaterietWaterwaysInView(testOnly = false) {
       return;
     }
     const lines = collectGeoJsonLines(data).map((line) => ({ ...line, license: LANTMATERIET_ATTRIBUTION }));
-    addReferenceLines(lines, "Lantmäteriet Hydrografi Direkt", { license: LANTMATERIET_ATTRIBUTION, fit: false });
+    addReferenceLines(lines, "Lantmäteriet Hydrografi Direkt", { license: LANTMATERIET_ATTRIBUTION, fit: false, replaceExisting: true });
     if ((data.numberMatched ?? 0) > lines.length) {
       referenceLineStatus.textContent = `${lines.length} Lantmäteriet-linjer hämtade. Zooma in mer om du vill minska urvalet.`;
     }
@@ -2731,15 +2889,22 @@ function osmLineProperties(tags = {}, extra = {}) {
 }
 
 function osmWayToReferenceLine(element, index) {
+  const tags = element.tags ?? {};
+  const points = element.geometry.map(osmPointFromGeometry);
   return {
     id: `osm-way-${element.id}`,
-    name: osmWaterwayName(element.tags, index),
-    properties: osmLineProperties(element.tags ?? {}, {
+    source: "OpenStreetMap Overpass",
+    osmId: element.id,
+    name: osmWaterwayName(tags, index),
+    typeLabel: osmWaterwayTypeLabel(tags),
+    waterway: tags.waterway ?? "",
+    pointCount: points.length,
+    properties: osmLineProperties(tags, {
       osmId: element.id,
       osmType: "way",
       sourceKind: "osm-way",
     }),
-    points: element.geometry.map(osmPointFromGeometry),
+    points,
   };
 }
 
@@ -2747,9 +2912,15 @@ function osmRelationMemberToReferenceLine(relation, member, index, memberIndex) 
   const relationTags = relation.tags ?? {};
   const memberTags = member.tags ?? {};
   const tags = { ...relationTags, ...memberTags };
+  const points = member.geometry.map(osmPointFromGeometry);
   return {
     id: `osm-relation-${relation.id}-way-${member.ref ?? memberIndex}`,
+    source: "OpenStreetMap Overpass",
+    osmId: member.ref ?? "",
     name: osmWaterwayName(tags, index),
+    typeLabel: osmWaterwayTypeLabel(tags),
+    waterway: tags.waterway ?? "",
+    pointCount: points.length,
     properties: osmLineProperties(tags, {
       osmId: member.ref ?? "",
       osmType: "relation-member-way",
@@ -2757,7 +2928,7 @@ function osmRelationMemberToReferenceLine(relation, member, index, memberIndex) 
       osmMemberRole: member.role ?? "",
       sourceKind: "osm-relation-member",
     }),
-    points: member.geometry.map(osmPointFromGeometry),
+    points,
   };
 }
 
@@ -2851,7 +3022,7 @@ async function fetchOsmWaterwaysInView() {
       referenceLineStatus.textContent = "Hittade inga OSM-vattendragslinjer i kartvyn. Zooma/panorera lite eller testa Lantmäteriet.";
       return;
     }
-    addReferenceLines(lines, "OpenStreetMap Overpass", { fit: false });
+    addReferenceLines(lines, "OpenStreetMap Overpass", { fit: false, replaceExisting: true });
     const types = [...new Set(lines.map((line) => line.properties?.waterway).filter(Boolean))].join(", ");
     if (lines.length) {
       referenceLineStatus.textContent = `${lines.length} OSM-linje${lines.length === 1 ? "" : "r"} hämtade${types ? ` (${types})` : ""}. Välj en eller flera i listan.`;
@@ -3242,21 +3413,43 @@ function openExportMail(watercourse, zipName) {
   window.location.href = `mailto:?subject=${subject}&body=${body}`;
 }
 
-function handlePointInMap(point) {
+function handlePointInMap(point, meta = {}) {
   if (state.tool === "pan") return;
   if (state.tool === "section") {
     if (!state.activeSection) return;
     const support = activeSupportLine();
+    const reachState = currentReachInputState();
+    if (reachState === "ready_to_save") {
+      console.warn("[InField reach] Kartklick ignoreras: delsträckan är redo att sparas.", {
+        eventType: meta.eventType ?? "unknown",
+        handlerSource: meta.source ?? "map",
+        currentReachState: reachState,
+        activeSegmentId: state.activeSegmentId,
+      });
+      return;
+    }
+    const action = state.activeSection.startConfirmed ? "section-end" : "section-start";
+    if (shouldIgnoreRepeatedMapMutation(action)) return;
     if (!state.activeSection.startConfirmed) {
       console.info("[InField reach] Startpunkt sätts.", {
+        eventType: meta.eventType ?? "unknown",
+        handlerSource: meta.source ?? "map",
+        currentReachState: reachState,
+        hasStartPoint: state.activeSection.points.length > 0,
+        hasEndPoint: state.activeSection.points.length > 1,
         activeSegmentId: state.activeSegmentId,
         activeSegmentIds: activeReachIds(),
         supportPoints: support?.length ?? 0,
       });
       state.activeSection.points = [support ? snapToLine(point, support).point : point];
-      state.reachWorkflowState = "reach_started";
+      state.reachWorkflowState = "waiting_for_start_confirm";
     } else {
       console.info("[InField reach] Slutpunkt sätts.", {
+        eventType: meta.eventType ?? "unknown",
+        handlerSource: meta.source ?? "map",
+        currentReachState: reachState,
+        hasStartPoint: state.activeSection.points.length > 0,
+        hasEndPoint: state.activeSection.points.length > 1,
         activeSegmentId: state.activeSegmentId,
         activeSegmentIds: activeReachIds(),
         supportPoints: support?.length ?? 0,
@@ -3268,24 +3461,34 @@ function handlePointInMap(point) {
       } else {
         state.activeSection.points = [state.activeSection.points[0], point];
       }
-      state.reachWorkflowState = "reach_completed";
+      state.reachWorkflowState = "ready_to_save";
     }
   } else if (state.tool === "point") {
+    if (shouldIgnoreRepeatedMapMutation("object-point")) return;
     const viewBeforePoint = mapViewSnapshot();
     console.info("[InField map] Punkt skapas.", {
+      eventType: meta.eventType ?? "unknown",
+      handlerSource: meta.source ?? "map",
       center: viewBeforePoint?.center,
       zoom: viewBeforePoint?.zoom,
       interactions: mapInteractionState(),
     });
-    if (addObjectPoint(point)) {
+    try {
+      if (addObjectPoint(point)) {
+        setTool("pan");
+        restoreMapView(viewBeforePoint);
+        render();
+        return;
+      }
+      fieldStatusLabel.textContent = "Starta eller välj en delsträcka innan du lägger objekt.";
+    } finally {
       setTool("pan");
       restoreMapView(viewBeforePoint);
-      render();
-      return;
     }
   } else if (state.tool === "photo") {
     triggerMapPhoto();
   } else if (state.tool === "field") {
+    if (shouldIgnoreRepeatedMapMutation("support-line-draw")) return;
     const reference = activeSupportLine();
     if (reference?.length > 1) {
       const snap = snapToLine(point, reference);
@@ -3308,13 +3511,18 @@ function handlePointInMap(point) {
           : "Lägg nästa punkt längs vattnet.";
     sideMapHint.textContent = mapHint.textContent;
   } else {
+    if (shouldIgnoreRepeatedMapMutation(`object-${state.tool}`)) return;
     addObjectVertex(point);
   }
   render();
 }
 
 function handleLeafletMapClick(event) {
-  handlePointInMap(fromLatLng(event.latlng));
+  if (event?.originalEvent?._infieldHandled) return;
+  handlePointInMap(fromLatLng(event.latlng), {
+    eventType: event?.originalEvent?.type ?? event?.type ?? "click",
+    source: "leaflet-map",
+  });
 }
 
 function handleMapClick(event) {
@@ -3325,7 +3533,10 @@ function handleMapClick(event) {
     return;
   }
   if (state.dragging) return;
-  handlePointInMap(svgPoint(event));
+  handlePointInMap(svgPoint(event), {
+    eventType: event.type,
+    source: "static-svg-map",
+  });
 }
 
 function startDrag(event) {
@@ -3426,7 +3637,7 @@ importReferenceLineButton.addEventListener("click", () => {
   referenceLineInput.click();
 });
 fetchOsmWaterwaysButton.addEventListener("click", fetchOsmWaterwaysInView);
-fetchLantmaterietWaterwaysButton?.addEventListener("click", () => fetchLantmaterietWaterwaysInView(false));
+fetchLantmaterietWaterwaysButton?.addEventListener("click", fetchOsmWaterwaysInView);
 toggleLantmaterietTokenButton?.addEventListener("click", toggleLantmaterietTokenVisibility);
 saveLantmaterietTokenButton?.addEventListener("click", saveLantmaterietToken);
 testLantmaterietTokenButton?.addEventListener("click", testLantmaterietCredentials);
@@ -3453,7 +3664,7 @@ referenceLineList.addEventListener("click", (event) => {
     const line = state.referenceLines.find((item) => item.id === selectId);
     if (line) {
       const lineName = safeReferenceLineName(line);
-      referenceLineStatus.textContent = isReferenceLineSelected(line) ? `Aktiv stödlinje: ${lineName}` : `Avmarkerad stödlinje: ${lineName}`;
+      referenceLineStatus.textContent = isReferenceLineSelected(line) ? `Vald stödlinje: ${lineName}` : `Avmarkerad stödlinje: ${lineName}`;
     }
     saveProject();
     render();
