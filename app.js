@@ -256,6 +256,8 @@ const fallbackObjectTypes = [
 ];
 
 const defaultMapCenter = [60.965, 16.44];
+const SUPPORT_LINE_MERGE_TOLERANCE_METERS = 10;
+const MANUAL_SUPPORT_LINE_GAP_TOLERANCE_METERS = 30;
 
 const state = {
   nextSectionNumber: 1,
@@ -287,6 +289,8 @@ const state = {
   useSupportLine: false,
   baseMapLayer: null,
   lastReferenceRenderSignature: "",
+  waterwayFetchInProgress: false,
+  waterwayFetchRequestId: 0,
 };
 
 const map = document.querySelector("#map");
@@ -601,16 +605,18 @@ function activeSupportLine() {
 }
 
 function activeReachIds() {
-  const id = Array.isArray(state.activeSegmentIds) && state.activeSegmentIds.length
-    ? state.activeSegmentIds.find(Boolean)
-    : state.activeSegmentId;
-  return id ? [id] : [];
+  const ids = Array.isArray(state.activeSegmentIds)
+    ? state.activeSegmentIds
+    : state.activeSegmentId
+      ? [state.activeSegmentId]
+      : [];
+  return [...new Set(ids)].filter(Boolean);
 }
 
 function setActiveReachIds(ids) {
-  const id = Array.isArray(ids) ? ids.find(Boolean) : ids;
-  state.activeSegmentId = id ?? null;
-  state.activeSegmentIds = id ? [id] : [];
+  const uniqueIds = [...new Set(Array.isArray(ids) ? ids : ids ? [ids] : [])].filter(Boolean);
+  state.activeSegmentIds = uniqueIds;
+  state.activeSegmentId = uniqueIds[0] ?? null;
 }
 
 function clearTemporaryDrawingState() {
@@ -1281,6 +1287,99 @@ function normalizeReferenceLine(line) {
   };
 }
 
+function referenceLineMergeKey(line) {
+  const source = String(line.source ?? "");
+  const waterway = String(line.waterway ?? line.properties?.waterway ?? "");
+  const name = referenceLineSortKey(line);
+  return `${source}|${waterway}|${name}`;
+}
+
+function bestLineConnection(basePoints, nextPoints) {
+  const start = basePoints[0];
+  const stop = basePoints.at(-1);
+  const nextStart = nextPoints[0];
+  const nextStop = nextPoints.at(-1);
+  const candidates = [
+    { mode: "append", reverse: false, distance: mapDistance(stop, nextStart) },
+    { mode: "append", reverse: true, distance: mapDistance(stop, nextStop) },
+    { mode: "prepend", reverse: false, distance: mapDistance(start, nextStop) },
+    { mode: "prepend", reverse: true, distance: mapDistance(start, nextStart) },
+  ];
+  return candidates.reduce((best, candidate) => (candidate.distance < best.distance ? candidate : best));
+}
+
+function joinLinePoints(basePoints, nextPoints, connection) {
+  const oriented = connection.reverse ? [...nextPoints].reverse() : nextPoints;
+  const omitDuplicate = connection.distance < 1;
+  if (connection.mode === "prepend") {
+    const prefix = omitDuplicate ? oriented.slice(0, -1) : oriented;
+    return [...prefix, ...basePoints];
+  }
+  const suffix = omitDuplicate ? oriented.slice(1) : oriented;
+  return [...basePoints, ...suffix];
+}
+
+function mergeConnectedReferenceLineGroup(lines) {
+  const remaining = lines.slice();
+  const merged = [];
+  while (remaining.length) {
+    const first = remaining.shift();
+    let points = normalizePoints(first.points ?? []);
+    const parts = [first];
+    let changed = true;
+    while (changed) {
+      changed = false;
+      let best = { index: -1, connection: null };
+      remaining.forEach((line, index) => {
+        const linePoints = normalizePoints(line.points ?? []);
+        if (linePoints.length < 2) return;
+        const connection = bestLineConnection(points, linePoints);
+        if (
+          connection.distance <= SUPPORT_LINE_MERGE_TOLERANCE_METERS &&
+          (!best.connection || connection.distance < best.connection.distance)
+        ) {
+          best = { index, connection };
+        }
+      });
+      if (best.index >= 0) {
+        const [line] = remaining.splice(best.index, 1);
+        points = joinLinePoints(points, normalizePoints(line.points ?? []), best.connection);
+        parts.push(line);
+        changed = true;
+      }
+    }
+    if (parts.length === 1) {
+      merged.push(first);
+    } else {
+      merged.push(normalizeReferenceLine({
+        ...first,
+        id: `merged-${crypto.randomUUID()}`,
+        pointCount: points.length,
+        properties: {
+          ...(first.properties ?? {}),
+          mergedSegmentCount: parts.length,
+          mergedSegmentIds: parts.map((part) => part.id),
+          mergedOsmIds: parts.map((part) => part.osmId).filter(Boolean),
+        },
+        points,
+      }));
+    }
+  }
+  return merged;
+}
+
+function mergeConnectedReferenceLines(lines) {
+  const groups = new Map();
+  lines.forEach((line) => {
+    const key = referenceLineMergeKey(line);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(line);
+  });
+  return [...groups.values()].flatMap((group) =>
+    group.length > 1 ? mergeConnectedReferenceLineGroup(group) : group
+  );
+}
+
 function selectedReferenceLineIds() {
   const ids = Array.isArray(state.selectedReferenceLineIds)
     ? state.selectedReferenceLineIds
@@ -1292,7 +1391,7 @@ function selectedReferenceLineIds() {
 }
 
 function setSelectedReferenceLineIds(ids) {
-  const uniqueIds = [...new Set(ids)].filter(Boolean).slice(0, 1);
+  const uniqueIds = [...new Set(ids)].filter(Boolean);
   state.selectedReferenceLineIds = uniqueIds;
   state.selectedReferenceLineId = uniqueIds[0] ?? null;
 }
@@ -1370,14 +1469,14 @@ function activateSelectedReferenceLines(options = {}) {
   if (!lines.length) {
     clearActiveReachLock();
     fieldStatusLabel.textContent = "Ingen stödlinje vald";
-    mapHint.textContent = "Välj en stödlinje i listan eller rita egen linje.";
+    mapHint.textContent = "Bocka i en eller flera stödlinjer i listan eller rita egen linje.";
     sideMapHint.textContent = mapHint.textContent;
     return;
   }
   fieldStatusLabel.textContent = "Stödlinje redo";
   mapHint.textContent = lines.length === 1
     ? "Stödlinje vald. Tryck Starta kartering för att låsa den."
-    : "Välj en stödlinje innan du startar kartering.";
+    : `${lines.length} stödlinjer valda. Tryck Starta kartering för att låsa sträckan.`;
   sideMapHint.textContent = mapHint.textContent;
   if (options.fit && state.draftFieldReach.length > 1) fitMapToPoints(state.draftFieldReach);
 }
@@ -2255,10 +2354,12 @@ function renderLists() {
   startMappingButton.disabled = state.mappingStarted || (state.draftFieldReach.length < 2 && !selectedLines.length);
   referenceLineStatus.textContent = state.referenceLines.length
     ? state.mappingStarted && activeReachIds().length
-      ? `Aktiv sträcka låst: ${activeReachIds().join(", ")}`
+      ? activeReachIds().length === 1
+        ? `Aktiv sträcka låst: ${activeReachIds()[0]}`
+        : `${activeReachIds().length} stödlinjer låsta som aktiv sträcka`
       : selectedLines.length
-      ? "1 stödlinje vald"
-      : `${state.referenceLines.length} linje${state.referenceLines.length === 1 ? "" : "r"} hittad${state.referenceLines.length === 1 ? "" : "e"}. Välj en i listan.`
+      ? `${selectedLines.length} stödlinje${selectedLines.length === 1 ? "" : "r"} vald${selectedLines.length === 1 ? "" : "a"}`
+      : `${state.referenceLines.length} linje${state.referenceLines.length === 1 ? "" : "r"} hittad${state.referenceLines.length === 1 ? "" : "e"}. Bocka i det du vill kartera.`
     : "Ingen stödlinje importerad.";
   state.referenceLines
     .slice()
@@ -2273,8 +2374,10 @@ function renderLists() {
     const lineName = safeReferenceLineName(line);
     li.className = selected ? "selected compact" : "compact";
     const locked = state.mappingStarted;
-    const selectedText = locked && selected ? "Låst aktiv sträcka" : selected ? "Vald stödlinje" : "Tryck Välj för att välja";
-    li.innerHTML = `<strong>${lineName}</strong><span>${selectedText} · ${formatLength(line.points)} · ${line.points.length} punkter</span><div class="list-actions"><button class="${selected ? "secondary-button" : "quiet-button"}" data-select-reference-line="${line.id}" ${locked ? "disabled" : ""}>${locked && selected ? "Låst" : selected ? "Vald" : "Välj"}</button><button class="danger-button" data-delete-reference-line="${line.id}" ${locked ? "disabled" : ""}>Ta bort</button></div>`;
+    const selectedText = locked && selected ? "Låst aktiv sträcka" : selected ? "Vald stödlinje" : "Bocka i för att välja";
+    const mergedCount = Number(line.properties?.mergedSegmentCount) || 1;
+    const mergedText = mergedCount > 1 ? ` · ${mergedCount} delar ihopslagna` : "";
+    li.innerHTML = `<label class="reference-line-choice"><input type="checkbox" data-select-reference-line="${line.id}" ${selected ? "checked" : ""} ${locked ? "disabled" : ""} /><span><strong>${lineName}</strong><small>${selectedText} · ${formatLength(line.points)} · ${line.points.length} punkter${mergedText}</small></span></label><div class="list-actions"><button class="danger-button" data-delete-reference-line="${line.id}" ${locked ? "disabled" : ""}>Ta bort</button></div>`;
     referenceLineList.append(li);
   });
 
@@ -2567,7 +2670,7 @@ function addReferenceLines(lines, source = "", options = {}) {
     clearActiveReachLock({ clearSelection: true });
     clearTemporaryDrawingState();
   }
-  const cleanLines = lines
+  const rawCleanLines = lines
     .map((line, index) =>
       normalizeReferenceLine({
         ...line,
@@ -2577,6 +2680,7 @@ function addReferenceLines(lines, source = "", options = {}) {
       })
     )
     .filter((line) => line.points.length > 1);
+  const cleanLines = mergeConnectedReferenceLines(rawCleanLines);
   if (!cleanLines.length) {
     referenceLineStatus.textContent = "Hittade ingen linje i filen.";
     return;
@@ -2594,10 +2698,12 @@ function addReferenceLines(lines, source = "", options = {}) {
   if (selectedReferenceLines().length) activateSelectedReferenceLines({ fit: false });
   referenceLineStatus.textContent = selectedReferenceLines().length
     ? `${cleanLines.length} stödlinje hämtad och aktiverad.`
-    : `${cleanLines.length} stödlinje${cleanLines.length === 1 ? "" : "r"} hämtad${cleanLines.length === 1 ? "" : "e"}. Välj i listan innan du startar kartering.`;
+    : `${cleanLines.length} stödlinje${cleanLines.length === 1 ? "" : "r"} hämtad${cleanLines.length === 1 ? "" : "e"}. Bocka i det du vill kartera.`;
   console.info("[State] Stödlinjer uppdaterade.", {
     source,
     fetchedLines: lines.length,
+    normalizedLines: rawCleanLines.length,
+    mergedLines: cleanLines.length,
     addedCandidateLines: cleanLines.length,
     candidateLines: state.referenceLines.length,
     selectedSupportLines: selectedReferenceLineIds(),
@@ -2991,36 +3097,59 @@ function osmDebugSummary(data, lines, bbox, query) {
   });
 }
 
+function setWaterwayFetchBusy(isBusy) {
+  state.waterwayFetchInProgress = isBusy;
+  fetchOsmWaterwaysButton.disabled = isBusy;
+  if (fetchLantmaterietWaterwaysButton) fetchLantmaterietWaterwaysButton.disabled = isBusy;
+}
+
 async function fetchOsmWaterwaysInView() {
   if (!state.backgroundMap) return;
   if (state.mappingStarted) {
     referenceLineStatus.textContent = "Kartering är startad. Byt vattendrag för att hämta nya stödlinjer.";
     return;
   }
-  const { south, west, north, east, span } = await currentMapViewBounds();
-  if (span > 0.25 && !window.confirm("Kartvyn är ganska stor. Det kan bli mycket data. Vill du hämta ändå?")) return;
-
-  referenceLineStatus.textContent = "Hämtar vattendragslinjer i kartvyn...";
-  const bbox = `${south},${west},${north},${east}`;
-  const query = `
-    [out:json][timeout:35];
-    (
-      way["waterway"~"${OSM_WATERWAY_PATTERN}"](${bbox});
-      relation["waterway"~"${OSM_WATERWAY_PATTERN}"](${bbox});
-      relation["type"="waterway"](${bbox});
-      relation["type"="route"]["route"~"^(water|waterway|river)$"](${bbox});
-    );
-    out tags geom;
-  `;
-
+  if (state.waterwayFetchInProgress) {
+    referenceLineStatus.textContent = "Hämtning pågår redan. Vänta tills den är klar.";
+    console.info("[InField OSM fetch] Extra hämttryck ignorerat medan en hämtning pågår.");
+    return;
+  }
+  const requestId = state.waterwayFetchRequestId + 1;
+  state.waterwayFetchRequestId = requestId;
+  setWaterwayFetchBusy(true);
   try {
+    const { south, west, north, east, span } = await currentMapViewBounds();
+    if (requestId !== state.waterwayFetchRequestId) return;
+    if (span > 0.25 && !window.confirm("Kartvyn är ganska stor. Det kan bli mycket data. Vill du hämta ändå?")) return;
+
+    referenceLineStatus.textContent = "Hämtar vattendragslinjer i kartvyn...";
+    const bbox = `${south},${west},${north},${east}`;
+    const query = `
+      [out:json][timeout:35];
+      (
+        way["waterway"~"${OSM_WATERWAY_PATTERN}"](${bbox});
+        relation["waterway"~"${OSM_WATERWAY_PATTERN}"](${bbox});
+        relation["type"="waterway"](${bbox});
+        relation["type"="route"]["route"~"^(water|waterway|river)$"](${bbox});
+      );
+      out tags geom;
+    `;
+
     console.info("[InField OSM fetch] Startar hämtning.", { bbox, south, west, north, east });
     const response = await fetch("https://overpass-api.de/api/interpreter", {
       method: "POST",
       body: `data=${encodeURIComponent(query)}`,
     });
+    if (requestId !== state.waterwayFetchRequestId) {
+      console.info("[InField OSM fetch] Sent svar ignorerat efter nyare hämtning.", { requestId });
+      return;
+    }
     if (!response.ok) throw new Error(`Overpass svarade ${response.status}.`);
     const data = await response.json();
+    if (requestId !== state.waterwayFetchRequestId) {
+      console.info("[InField OSM fetch] Sent svar ignorerat efter nyare hämtning.", { requestId });
+      return;
+    }
     const lines = collectOsmWaterwayLines(data);
     osmDebugSummary(data, lines, bbox, query);
     if (!lines.length) {
@@ -3030,19 +3159,26 @@ async function fetchOsmWaterwaysInView() {
     addReferenceLines(lines, "OpenStreetMap Overpass", { fit: false, replaceExisting: true });
     const types = [...new Set(lines.map((line) => line.properties?.waterway).filter(Boolean))].join(", ");
     if (lines.length) {
-      referenceLineStatus.textContent = `${lines.length} OSM-linje${lines.length === 1 ? "" : "r"} hämtade${types ? ` (${types})` : ""}. Välj en i listan.`;
+      referenceLineStatus.textContent = `${lines.length} OSM-linje${lines.length === 1 ? "" : "r"} hämtade${types ? ` (${types})` : ""}. Bocka i det du vill kartera.`;
     }
   } catch (error) {
     console.warn("[InField OSM fetch] Hämtningen misslyckades.", error);
     referenceLineStatus.textContent = "Kunde inte hämta linjer just nu. Testa mindre kartvy eller importera fil.";
+  } finally {
+    if (requestId === state.waterwayFetchRequestId) setWaterwayFetchBusy(false);
   }
 }
 
 function combinedReferenceLinePoints(lines) {
+  return connectedReferenceLineGeometry(lines).points;
+}
+
+function connectedReferenceLineGeometry(lines) {
   const validLines = lines.map((line) => normalizePoints(line.points ?? [])).filter((points) => points.length > 1);
-  if (!validLines.length) return [];
+  if (!validLines.length) return { points: [], maxGap: 0, gaps: [] };
   const remaining = validLines.slice(1);
   const combined = [...validLines[0]];
+  const gaps = [];
   while (remaining.length) {
     const last = combined.at(-1);
     let best = { index: 0, reverse: false, distance: Infinity };
@@ -3054,9 +3190,14 @@ function combinedReferenceLinePoints(lines) {
     });
     const [next] = remaining.splice(best.index, 1);
     const oriented = best.reverse ? [...next].reverse() : next;
+    gaps.push(best.distance);
     combined.push(...(best.distance < 1 ? oriented.slice(1) : oriented));
   }
-  return combined;
+  return {
+    points: combined,
+    maxGap: gaps.length ? Math.max(...gaps) : 0,
+    gaps,
+  };
 }
 
 function prepareFieldArea() {
@@ -3100,13 +3241,19 @@ function startMapping() {
     return;
   }
   const selectedLines = selectedReferenceLines();
-  if (selectedLines.length > 1) {
-    fieldStatusLabel.textContent = "Välj bara en stödlinje åt gången.";
-    setSelectedReferenceLineIds([selectedLines[0].id]);
-    return;
-  }
-  if (selectedLines.length === 1) {
-    state.draftFieldReach = combinedReferenceLinePoints(selectedLines);
+  if (selectedLines.length) {
+    const connection = connectedReferenceLineGeometry(selectedLines);
+    if (connection.maxGap > MANUAL_SUPPORT_LINE_GAP_TOLERANCE_METERS) {
+      fieldStatusLabel.textContent = "Valda stödlinjer hänger inte ihop";
+      referenceLineStatus.textContent = `Största glappet är ${Math.round(connection.maxGap)} m. Välj om linjerna eller hämta en mindre kartvy.`;
+      console.warn("[InField reach] Valda stödlinjer kunde inte kopplas ihop säkert.", {
+        selectedSupportLines: selectedReferenceLineIds(),
+        maxGapMeters: connection.maxGap,
+        toleranceMeters: MANUAL_SUPPORT_LINE_GAP_TOLERANCE_METERS,
+      });
+      return;
+    }
+    state.draftFieldReach = connection.points;
     state.activeReachGeometry = [...state.draftFieldReach];
     setActiveReachIds(selectedReferenceLineIds());
   } else {
@@ -3124,6 +3271,7 @@ function startMapping() {
     activeSegmentId: state.activeSegmentId,
     activeSegmentIds: state.activeSegmentIds,
     points: state.activeReachGeometry.length,
+    selectedSupportLines: selectedReferenceLineIds().length,
   });
   setTool("pan");
   activateTab("protocol");
@@ -3656,8 +3804,10 @@ referenceLineInput.addEventListener("change", () => {
   referenceLineInput.value = "";
 });
 referenceLineList.addEventListener("click", (event) => {
-  const selectId = event.target.dataset.selectReferenceLine;
-  const deleteId = event.target.dataset.deleteReferenceLine;
+  const selectTarget = event.target.closest?.("[data-select-reference-line]");
+  const deleteTarget = event.target.closest?.("[data-delete-reference-line]");
+  const selectId = selectTarget?.dataset.selectReferenceLine;
+  const deleteId = deleteTarget?.dataset.deleteReferenceLine;
   if (state.mappingStarted && (selectId || deleteId)) {
     console.warn("[InField reach] Ändring av stödlinje ignoreras under aktiv kartering.", {
       requestedSegmentId: selectId || deleteId,
