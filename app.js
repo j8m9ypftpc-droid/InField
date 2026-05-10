@@ -256,7 +256,7 @@ const fallbackObjectTypes = [
 ];
 
 const defaultMapCenter = [60.965, 16.44];
-const APP_VERSION_LABEL = "V2.1";
+const APP_VERSION_LABEL = "V2.2";
 const SUPPORT_LINE_MERGE_TOLERANCE_METERS = 10;
 const MANUAL_SUPPORT_LINE_GAP_TOLERANCE_METERS = 30;
 const MANUAL_SUPPORT_LINE_HARD_GAP_LIMIT_METERS = 250;
@@ -272,6 +272,7 @@ const state = {
   referenceLines: [],
   selectedReferenceLineId: null,
   selectedReferenceLineIds: [],
+  lastSupportLineIds: [],
   activeSegmentId: null,
   activeSegmentIds: [],
   activeReachGeometry: [],
@@ -621,10 +622,27 @@ function activeReachIds() {
   return [...new Set(ids)].filter(Boolean);
 }
 
+function existingReferenceLineIds() {
+  return new Set(state.referenceLines.map((line) => line.id));
+}
+
+function cleanSupportLineIds(ids) {
+  const existingIds = existingReferenceLineIds();
+  return [...new Set(Array.isArray(ids) ? ids : ids ? [ids] : [])].filter((id) => id && (!existingIds.size || existingIds.has(id)));
+}
+
+function rememberSupportLineSelection(ids = []) {
+  const candidates = ids.length ? ids : [...selectedReferenceLineIds(), ...activeReachIds(), ...(state.lastSupportLineIds ?? [])];
+  const rememberedIds = cleanSupportLineIds(candidates);
+  if (rememberedIds.length) state.lastSupportLineIds = rememberedIds;
+  return rememberedIds;
+}
+
 function setActiveReachIds(ids) {
   const uniqueIds = [...new Set(Array.isArray(ids) ? ids : ids ? [ids] : [])].filter(Boolean);
   state.activeSegmentIds = uniqueIds;
   state.activeSegmentId = uniqueIds[0] ?? null;
+  if (uniqueIds.length) rememberSupportLineSelection(uniqueIds);
 }
 
 function clearTemporaryDrawingState() {
@@ -970,7 +988,7 @@ function renderProjectList() {
     const objects = payload.objects?.length ?? 0;
     const photos = payload.photos?.length ?? 0;
     const li = document.createElement("li");
-    li.innerHTML = `<strong>${payload.watercourse}</strong><span>${sections} sträckor · ${objects} objekt · ${photos} foton</span><div class="list-actions"><button class="quiet-button" data-open-project="${payload.watercourse}">Öppna</button><button class="quiet-button" data-export-project="${payload.watercourse}">Exportera</button><button class="danger-button" data-delete-project="${key}">Radera lokalt</button></div>`;
+    li.innerHTML = `<strong>${payload.watercourse}</strong><span>${sections} sträckor · ${objects} objekt · ${photos} foton</span><div class="list-actions"><button class="quiet-button" data-open-project="${payload.watercourse}">Öppna</button><button class="quiet-button" data-continue-project="${payload.watercourse}">Fortsätt kartera</button><button class="quiet-button" data-export-project="${payload.watercourse}">Exportera</button><button class="danger-button" data-delete-project="${key}">Radera lokalt</button></div>`;
     projectList.append(li);
   });
 }
@@ -1074,6 +1092,7 @@ function saveProject(options = {}) {
   if (options.syncProtocol !== false) syncFormToProtocol({ save: false });
   syncProjectMetaFromForm();
   state.nextSectionNumber = nextSectionNumber();
+  const rememberedSupportLineIds = rememberSupportLineSelection();
   const payload = {
     watercourse: state.watercourse,
     nextSectionNumber: state.nextSectionNumber,
@@ -1085,6 +1104,7 @@ function saveProject(options = {}) {
     referenceLines: state.referenceLines,
     selectedReferenceLineId: state.selectedReferenceLineId,
     selectedReferenceLineIds: selectedReferenceLineIds(),
+    lastSupportLineIds: rememberedSupportLineIds,
     activeSegmentId: state.activeSegmentId,
     activeSegmentIds: activeReachIds(),
     activeReachGeometry: state.activeReachGeometry,
@@ -1105,7 +1125,59 @@ function nextSectionNumber() {
   return Math.max(0, ...numbers) + 1;
 }
 
-function openWatercourse(name, saveCurrent = true) {
+function supportLineIdsFromPayload(payload) {
+  const selectedIds = payload.selectedReferenceLineIds ?? (payload.selectedReferenceLineId ? [payload.selectedReferenceLineId] : []);
+  const activeIds = Array.isArray(payload.activeSegmentIds) ? payload.activeSegmentIds : payload.activeSegmentId ? [payload.activeSegmentId] : [];
+  return cleanSupportLineIds([...(payload.lastSupportLineIds ?? []), ...selectedIds, ...activeIds]);
+}
+
+function enterProjectReviewMode() {
+  const rememberedSupportLineIds = rememberSupportLineSelection(state.lastSupportLineIds ?? []);
+  state.mappingStarted = false;
+  setSelectedReferenceLineIds([]);
+  clearActiveReachLock();
+  state.draftFieldReach = [];
+  state.activeReachGeometry = [];
+  state.reachWorkflowState = "idle";
+  state.lastSupportLineIds = rememberedSupportLineIds;
+  clearTemporaryDrawingState();
+  fieldStatusLabel.textContent = state.sections.length ? "Insamlade delsträckor visas" : "Inga delsträckor ännu";
+  mapHint.textContent = "Öppnat för att titta på eller redigera insamlade delsträckor.";
+  sideMapHint.textContent = mapHint.textContent;
+  setTool("pan");
+  activateTab("sections");
+}
+
+function enterProjectContinueMode() {
+  const restoreIds = cleanSupportLineIds(state.lastSupportLineIds ?? []);
+  state.mappingStarted = false;
+  setSelectedReferenceLineIds(restoreIds);
+  setActiveReachIds([]);
+  state.activeReachGeometry = [];
+  clearTemporaryDrawingState();
+
+  if (restoreIds.length) {
+    activateSelectedReferenceLines({ fit: true });
+    referenceLineStatus.textContent = `${restoreIds.length} tidigare vald stödlinje${restoreIds.length === 1 ? "" : "r"} återställd${restoreIds.length === 1 ? "" : "a"}.`;
+  } else {
+    state.draftFieldReach = [];
+    state.reachWorkflowState = "idle";
+    fieldStatusLabel.textContent = "Välj stödlinje";
+    referenceLineStatus.textContent = "Ingen tidigare stödlinje hittades. Hämta vattendrag och bocka i linjer igen.";
+    mapHint.textContent = "Hämta vattendrag i kartvyn, bocka i en eller flera linjer och använd dem som stödlinje.";
+    sideMapHint.textContent = mapHint.textContent;
+  }
+
+  setTool("pan");
+  activateTab("protocol");
+}
+
+function openWatercourse(name, saveCurrent = true, options = {}) {
+  if (typeof saveCurrent === "object") {
+    options = saveCurrent;
+    saveCurrent = options.saveCurrent ?? true;
+  }
+  const openMode = options.mode ?? "review";
   const cleanName = name.trim() || "Nytt vattendrag";
   if (saveCurrent && state.activeSection) {
     syncFormToProtocol();
@@ -1126,6 +1198,7 @@ function openWatercourse(name, saveCurrent = true) {
     state.photos = payload.photos ?? [];
     state.fieldPackages = (payload.fieldPackages ?? []).map(normalizeFieldPackage);
     state.referenceLines = (payload.referenceLines ?? []).map(normalizeReferenceLine);
+    state.lastSupportLineIds = supportLineIdsFromPayload(payload);
     setSelectedReferenceLineIds(payload.selectedReferenceLineIds ?? (payload.selectedReferenceLineId ? [payload.selectedReferenceLineId] : []));
     state.mappingStarted = Boolean(payload.mappingStarted || payload.activeSection);
     if (state.mappingStarted) {
@@ -1147,6 +1220,8 @@ function openWatercourse(name, saveCurrent = true) {
     syncProjectChoices();
     state.nextSectionNumber = Math.max(payload.nextSectionNumber ?? 1, nextSectionNumber());
     saveStateLabel.textContent = `Öppnade sparat arbete för ${cleanName}`;
+    if (openMode === "continue") enterProjectContinueMode();
+    else enterProjectReviewMode();
   } else {
     state.nextSectionNumber = 1;
     state.sections = [];
@@ -1156,6 +1231,7 @@ function openWatercourse(name, saveCurrent = true) {
     state.referenceLines = [];
     state.selectedReferenceLineId = null;
     state.selectedReferenceLineIds = [];
+    state.lastSupportLineIds = [];
     clearActiveReachLock();
     state.draftFieldReach = [];
     state.mappingStarted = false;
@@ -1399,9 +1475,10 @@ function selectedReferenceLineIds() {
 }
 
 function setSelectedReferenceLineIds(ids) {
-  const uniqueIds = [...new Set(ids)].filter(Boolean);
+  const uniqueIds = cleanSupportLineIds(ids);
   state.selectedReferenceLineIds = uniqueIds;
   state.selectedReferenceLineId = uniqueIds[0] ?? null;
+  if (uniqueIds.length) rememberSupportLineSelection(uniqueIds);
 }
 
 function setActiveReachFromSelectedLines() {
@@ -3929,9 +4006,11 @@ startWatercourseInput.addEventListener("keydown", (event) => {
 });
 projectList.addEventListener("click", (event) => {
   const openName = event.target.dataset.openProject;
+  const continueName = event.target.dataset.continueProject;
   const exportName = event.target.dataset.exportProject;
   const deleteKey = event.target.dataset.deleteProject;
   if (openName) openWatercourse(openName);
+  if (continueName) openWatercourse(continueName, true, { mode: "continue" });
   if (exportName) {
     const payload = readSavedProject(storageKey(exportName));
     if (payload) exportGeoJson(payload);
