@@ -171,10 +171,123 @@ const protocolGroups = [
         showIf: (a) => a.sanktBasniva === "Ja",
       },
       { key: "mataInskarningskvot", label: "Mät inskärningskvot med RTK RH2000", type: "binary" },
-      { key: "hojdNuvarandeBs", label: "RTK RH2000 höjd nuvarande bestämmande sektion", type: "decimal", showIf: (a) => a.mataInskarningskvot === "Ja" },
-      { key: "hojdThalweg", label: "RTK RH2000 höjd djupaste del uppströms/thalweg", type: "decimal", showIf: (a) => a.mataInskarningskvot === "Ja" },
-      { key: "hojdBankfull", label: "RTK RH2000 höjd bankfullnivå", type: "decimal", showIf: (a) => a.mataInskarningskvot === "Ja" },
+      {
+        key: "smhiHydronuLink",
+        label: "SMHI Hydrologiskt nuläge",
+        type: "externalLink",
+        url: "https://vattenwebb.smhi.se/hydronu/",
+        buttonLabel: "Öppna SMHI HydroNu",
+        helpText: "Öppna SMHI som stöd för flödesläget. Värdet fylls i manuellt i fältet nedan.",
+        showIf: (a) => a.mataInskarningskvot === "Ja",
+      },
+      {
+        key: "bsScenarioStracktyp",
+        label: "Sträcktyp för tolkning",
+        type: "select",
+        options: [
+          "Låggradient med svämplan",
+          "Meandrande/slingrande fåra",
+          "Rensad/rätad fåra",
+          "Svagt lutande skogs-/morbäck",
+          "Brant blockrik sträcka",
+          "Berg-/tröskelkontrollerad sträcka",
+          "Dike/grävd fåra",
+          "Våtmarks-/översilningssträcka",
+          "Osäker",
+        ],
+        helpText: "Välj den sträcktyp som bäst beskriver platsen. Inskärningskvot är mest relevant där bankfull och svämplan kan identifieras.",
+        showIf: (a) => a.mataInskarningskvot === "Ja",
+      },
+      {
+        key: "bsScenarioPaverkan",
+        label: "Bedömd påverkan",
+        type: "select",
+        options: ["Naturlig", "Rensad/sänkt", "Grävd/fördjupad", "Delvis påverkad", "Osäker"],
+        helpText: "Ange om fåran eller bestämmande sektion verkar påverkad av rensning, sänkning, grävning eller annan fysisk påverkan.",
+        showIf: (a) => a.mataInskarningskvot === "Ja",
+      },
+      {
+        key: "hojdThalweg",
+        label: "RTK RH2000 thalweg/djupaste del",
+        type: "decimal",
+        helpText: "Mät lägsta punkten i fårans botten i aktuell sektion. Används som referensnivå för övriga höjder.",
+        showIf: (a) => a.mataInskarningskvot === "Ja",
+      },
+      {
+        key: "hojdNuvarandeBs",
+        label: "RTK RH2000 nuvarande bestämmande sektion/tröskel",
+        type: "decimal",
+        helpText: "Mät nivån på lokal tröskel eller sektion som styr vattennivån uppströms vid låga till måttliga flöden.",
+        showIf: (a) => a.mataInskarningskvot === "Ja",
+      },
+      {
+        key: "hojdVattenytaInmatning",
+        label: "RTK RH2000 vattenyta vid inmätning",
+        type: "decimal",
+        helpText: "Mät aktuell vattenyta vid besöket. Värdet ska tolkas tillsammans med hydrologiskt nuläge.",
+        showIf: (a) => a.mataInskarningskvot === "Ja",
+      },
+      {
+        key: "hydrologisktNulageInmatning",
+        label: "Hydrologiskt nuläge vid inmätning",
+        type: "select",
+        options: ["Mycket lågt", "Lågt", "Normal/lågmedel", "Medel", "Högt", "Mycket högt", "Osäkert"],
+        helpText:
+          "Ange flödesläget vid inmätningen. Detta används för att tolka den inmätta vattenytan.",
+        showIf: (a) => a.mataInskarningskvot === "Ja",
+      },
+      {
+        key: "flodesklassOmKand",
+        label: "Flödesklass om känd",
+        type: "select",
+        options: ["< MLQ/LMQ", "≈ MLQ/LMQ", "MLQ/LMQ–MQ", "≈ MQ", "MQ–MHQ", "≈ MHQ", "> MHQ", "Okänt"],
+        helpText: "Använd endast om flödesstatistik eller annan hydrologisk bedömning finns. Lämna annars okänt.",
+        showIf: (a) => a.mataInskarningskvot === "Ja",
+      },
+      {
+        key: "hojdBankfull",
+        label: "RTK RH2000 bankfullnivå",
+        type: "decimal",
+        helpText: "Mät bedömd bankfullnivå där fåran ungefär är fylld innan vatten bräddar mot aktivt svämplan.",
+        showIf: (a) => a.mataInskarningskvot === "Ja",
+      },
+      {
+        key: "hojdSvamplanRecentTerrass",
+        label: "RTK RH2000 svämplan/recent terrass",
+        type: "decimal",
+        helpText: "Mät nivån på aktivt svämplan eller recent terrass. Blanda inte ihop detta med bestämmande sektion.",
+        showIf: (a) => a.mataInskarningskvot === "Ja",
+      },
+      {
+        key: "hojdForeslagenBs",
+        label: "Föreslagen ny BS-nivå, RTK RH2000",
+        type: "decimal",
+        helpText: "Ange ett scenario för återställd eller höjd bestämmande sektion. Detta är fältstöd, inte projektering.",
+        showIf: (a) => a.mataInskarningskvot === "Ja",
+      },
+      { key: "nuvarandeBsOverThalweg", label: "Nuvarande BS över thalweg", type: "computed", showIf: (a) => a.mataInskarningskvot === "Ja" },
+      { key: "vattenytaOverThalweg", label: "Vattenyta vid inmätning över thalweg", type: "computed", showIf: (a) => a.mataInskarningskvot === "Ja" },
+      { key: "foreslagenBsOverThalweg", label: "Föreslagen BS över thalweg", type: "computed", showIf: (a) => a.mataInskarningskvot === "Ja" },
+      { key: "foreslagenBsAndring", label: "Föreslagen höjning/sänkning", type: "computed", showIf: (a) => a.mataInskarningskvot === "Ja" },
+      { key: "foreslagenBsRelVattenyta", label: "Föreslagen BS relativt vattenyta", type: "computed", showIf: (a) => a.mataInskarningskvot === "Ja" },
+      { key: "bankfullDjup", label: "Bankfulldjup", type: "computed", showIf: (a) => a.mataInskarningskvot === "Ja" },
+      { key: "foreslagenBsRelBankfull", label: "Föreslagen BS relativt bankfull", type: "computed", showIf: (a) => a.mataInskarningskvot === "Ja" },
+      { key: "svamplanshojdOverThalweg", label: "Svämplanshöjd över thalweg", type: "computed", showIf: (a) => a.mataInskarningskvot === "Ja" },
       { key: "inskarningskvot", label: "Beräknad inskärningskvot", type: "computed", showIf: (a) => a.mataInskarningskvot === "Ja" },
+      { key: "foreslagenBsRelSvamplan", label: "Föreslagen BS relativt svämplan", type: "computed", showIf: (a) => a.mataInskarningskvot === "Ja" },
+      {
+        key: "bsScenarioTolkning",
+        label: "Tolkning och varningar",
+        type: "computedText",
+        showIf: (a) => a.mataInskarningskvot === "Ja",
+      },
+      {
+        key: "bsScenarioKommentar",
+        label: "Kommentar till nivåer och osäkerheter",
+        type: "textarea",
+        helpText: "Beskriv fälttecken, osäkerheter, rensningsspår, referenssträcka eller annat som påverkar tolkningen.",
+        showIf: (a) => a.mataInskarningskvot === "Ja",
+      },
       { key: "aktivtSvamplan", label: "Aktivt svämplan", type: "binary" },
       { key: "recentTerrass", label: "Recent terrass", type: "binary" },
       { key: "sekundaraSvamplan", label: "Sekundära svämplan", type: "binary" },
@@ -257,7 +370,7 @@ const fallbackObjectTypes = [
 ];
 
 const defaultMapCenter = [60.965, 16.44];
-const APP_VERSION_LABEL = "V2.2.10";
+const APP_VERSION_LABEL = "V2.2.11";
 const SUPPORT_LINE_MERGE_TOLERANCE_METERS = 10;
 const MANUAL_SUPPORT_LINE_GAP_TOLERANCE_METERS = 30;
 const MANUAL_SUPPORT_LINE_HARD_GAP_LIMIT_METERS = 250;
@@ -2139,6 +2252,26 @@ function renderProtocolField(field) {
   }
   wrapper.append(label);
 
+  const appendHelpText = () => {
+    if (!field.helpText) return;
+    const helpText = document.createElement("small");
+    helpText.className = "field-help-text";
+    helpText.textContent = field.helpText;
+    wrapper.append(helpText);
+  };
+
+  if (field.type === "externalLink") {
+    const link = document.createElement("a");
+    link.className = "secondary-button field-link-button";
+    link.href = field.url;
+    link.target = "_blank";
+    link.rel = "noopener";
+    link.textContent = field.buttonLabel ?? "Öppna";
+    wrapper.append(link);
+    appendHelpText();
+    return wrapper;
+  }
+
   if (field.type === "buttons" || field.type === "binary") {
     const grid = document.createElement("div");
     const options = field.type === "binary" ? ["Nej", "Ja"] : field.options;
@@ -2163,11 +2296,23 @@ function renderProtocolField(field) {
       grid.append(button);
     });
     wrapper.append(grid);
+    appendHelpText();
     return wrapper;
   }
 
   if (field.type === "fractionMix") {
     wrapper.append(renderFractionMixField(field));
+    appendHelpText();
+    return wrapper;
+  }
+
+  if (field.type === "computedText") {
+    const output = document.createElement("div");
+    output.className = "computed-text";
+    const value = state.activeSection?.attributes?.[field.key] ?? "";
+    output.textContent = value || "Inga varningar eller tolkningar ännu.";
+    wrapper.append(output);
+    appendHelpText();
     return wrapper;
   }
 
@@ -2200,6 +2345,7 @@ function renderProtocolField(field) {
     syncProtocolToForm();
   });
   wrapper.append(input);
+  appendHelpText();
   return wrapper;
 }
 
@@ -2271,12 +2417,93 @@ function updateCalculatedProtocolFields() {
   if (!state.activeSection) return;
   const attrs = state.activeSection.attributes;
   const numeric = (value) => Number(String(value ?? "").replace(",", "."));
-  const bs = Number(String(attrs.hojdNuvarandeBs ?? "").replace(",", "."));
-  const thalweg = Number(String(attrs.hojdThalweg ?? "").replace(",", "."));
-  const bankfull = Number(String(attrs.hojdBankfull ?? "").replace(",", "."));
-  const denominator = bs - thalweg;
-  if (attrs.mataInskarningskvot === "Ja" && Number.isFinite(bs) && Number.isFinite(thalweg) && Number.isFinite(bankfull) && denominator !== 0) {
-    attrs.inskarningskvot = ((bankfull - thalweg) / denominator).toFixed(2);
+  const rounded = (value, digits = 2) => (Number.isFinite(value) ? value.toFixed(digits) : "");
+  const setValue = (key, value, digits = 2) => {
+    attrs[key] = rounded(value, digits);
+  };
+  const bsKeys = [
+    "nuvarandeBsOverThalweg",
+    "vattenytaOverThalweg",
+    "foreslagenBsOverThalweg",
+    "foreslagenBsAndring",
+    "foreslagenBsRelVattenyta",
+    "bankfullDjup",
+    "foreslagenBsRelBankfull",
+    "svamplanshojdOverThalweg",
+    "inskarningskvot",
+    "foreslagenBsRelSvamplan",
+    "bsScenarioTolkning",
+  ];
+  if (attrs.mataInskarningskvot !== "Ja") {
+    bsKeys.forEach((key) => {
+      attrs[key] = "";
+    });
+  } else {
+    const thalweg = numeric(attrs.hojdThalweg);
+    const currentBs = numeric(attrs.hojdNuvarandeBs);
+    const waterLevel = numeric(attrs.hojdVattenytaInmatning);
+    const bankfull = numeric(attrs.hojdBankfull);
+    const floodplain = numeric(attrs.hojdSvamplanRecentTerrass);
+    const proposedBs = numeric(attrs.hojdForeslagenBs);
+    const hasT = Number.isFinite(thalweg);
+    const hasCurrentBs = Number.isFinite(currentBs);
+    const hasWater = Number.isFinite(waterLevel);
+    const hasBankfull = Number.isFinite(bankfull);
+    const hasFloodplain = Number.isFinite(floodplain);
+    const hasProposedBs = Number.isFinite(proposedBs);
+    const bankfullDepth = hasBankfull && hasT ? bankfull - thalweg : NaN;
+    const floodplainDepth = hasFloodplain && hasT ? floodplain - thalweg : NaN;
+    const messages = [
+      "Beräkningen är ett fältstöd. Åtgärdsnivå behöver verifieras mot hydraulik, markavvattning, erosion, naturvärden, juridik och referensförhållanden.",
+    ];
+
+    setValue("nuvarandeBsOverThalweg", hasCurrentBs && hasT ? currentBs - thalweg : NaN);
+    setValue("vattenytaOverThalweg", hasWater && hasT ? waterLevel - thalweg : NaN);
+    setValue("foreslagenBsOverThalweg", hasProposedBs && hasT ? proposedBs - thalweg : NaN);
+    setValue("foreslagenBsAndring", hasProposedBs && hasCurrentBs ? proposedBs - currentBs : NaN);
+    setValue("foreslagenBsRelVattenyta", hasProposedBs && hasWater ? proposedBs - waterLevel : NaN);
+    setValue("bankfullDjup", bankfullDepth);
+    setValue("foreslagenBsRelBankfull", hasProposedBs && hasBankfull ? bankfull - proposedBs : NaN);
+    setValue("svamplanshojdOverThalweg", floodplainDepth);
+    setValue("foreslagenBsRelSvamplan", hasProposedBs && hasFloodplain ? floodplain - proposedBs : NaN);
+
+    if (!hasBankfull || !hasFloodplain) {
+      attrs.inskarningskvot = "";
+      messages.push("Inskärningskvot ej beräknad - bankfullnivå och/eller svämplansnivå saknas.");
+    } else if (bankfullDepth <= 0) {
+      attrs.inskarningskvot = "";
+      messages.push("Bankfulldjup är noll eller negativt. Kontrollera thalweg och bankfullnivå.");
+    } else if (floodplainDepth <= 0) {
+      attrs.inskarningskvot = "";
+      messages.push("Svämplansnivå ligger inte över thalweg. Kontrollera mätvärden.");
+    } else {
+      attrs.inskarningskvot = (floodplainDepth / bankfullDepth).toFixed(2);
+    }
+
+    if (hasProposedBs && hasBankfull && proposedBs > bankfull) {
+      messages.push("Föreslagen BS ligger över bankfull. Kontrollera risk för dämning eller påverkan uppströms.");
+    }
+    if (hasProposedBs && hasFloodplain && proposedBs >= floodplain - 0.05) {
+      messages.push("Stark varning: föreslagen BS ligger nära eller över svämplan/recent terrass.");
+    }
+    if (hasCurrentBs && hasBankfull && currentBs > bankfull) {
+      messages.push("Kontrollera om BS och bankfull/svämplan har blandats ihop.");
+    }
+
+    const lessRelevantTypes = new Set(["Brant blockrik sträcka", "Berg-/tröskelkontrollerad sträcka", "Dike/grävd fåra", "Osäker"]);
+    if (lessRelevantTypes.has(attrs.bsScenarioStracktyp)) {
+      messages.push("Inskärningskvot kan vara mindre relevant för vald sträcktyp. Tolka främst nivåskillnader och fältobservationer.");
+    }
+
+    if (["Mycket lågt", "Lågt"].includes(attrs.hydrologisktNulageInmatning)) {
+      messages.push("Inmätt vattenyta kan användas som ungefärlig lågflödesreferens, om bedömningen är säker.");
+    } else if (["Medel", "Högt", "Mycket högt"].includes(attrs.hydrologisktNulageInmatning)) {
+      messages.push("Inmätt vattenyta bör inte tolkas som lågflödesnivå.");
+    } else if (attrs.hydrologisktNulageInmatning === "Osäkert") {
+      messages.push("Vattenytans representativitet är osäker. Kompletterande inmätning vid annat flöde kan behövas.");
+    }
+
+    attrs.bsScenarioTolkning = messages.join("\n");
   }
   if (attrs.beraknaInneslutning === "Ja") {
     const currentFloodplain = numeric(attrs.nuvarandeSvamplansbredd);

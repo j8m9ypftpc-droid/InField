@@ -951,6 +951,7 @@ button:disabled {
 
 textarea,
 select,
+.field-group input,
 .field-area-card input,
 .fraction-mix-row input[type="number"] {
   width: 100%;
@@ -960,6 +961,33 @@ select,
   background: var(--panel);
   color: var(--ink);
   resize: vertical;
+}
+
+.field-help-text {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.field-link-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
+  text-decoration: none;
+}
+
+.computed-text {
+  white-space: pre-line;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: color-mix(in srgb, var(--accent) 10%, var(--panel));
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1.4;
 }
 
 .token-settings {
