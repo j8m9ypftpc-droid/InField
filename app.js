@@ -257,7 +257,7 @@ const fallbackObjectTypes = [
 ];
 
 const defaultMapCenter = [60.965, 16.44];
-const APP_VERSION_LABEL = "V2.2.9";
+const APP_VERSION_LABEL = "V2.2.10";
 const SUPPORT_LINE_MERGE_TOLERANCE_METERS = 10;
 const MANUAL_SUPPORT_LINE_GAP_TOLERANCE_METERS = 30;
 const MANUAL_SUPPORT_LINE_HARD_GAP_LIMIT_METERS = 250;
@@ -279,6 +279,7 @@ const state = {
   activeReachGeometry: [],
   reachWorkflowState: "idle",
   mappingStarted: false,
+  reviewMode: false,
   tool: "pan",
   lastObjectTool: "point",
   lastExport: null,
@@ -1089,6 +1090,7 @@ function switchProject() {
   clearActiveReachLock({ clearSelection: true });
   state.draftFieldReach = [];
   state.mappingStarted = false;
+  state.reviewMode = false;
   clearTemporaryDrawingState();
   console.info("[InField reach] Aktiv sträcka släppt via Byt vattendrag utan att radera sparad kartering.");
   renderProjectList();
@@ -1119,6 +1121,7 @@ function saveProject(options = {}) {
     activeReachGeometry: state.activeReachGeometry,
     reachWorkflowState: state.reachWorkflowState,
     mappingStarted: state.mappingStarted,
+    reviewMode: state.reviewMode,
     projectMeta: state.projectMeta,
     savedAt: new Date().toISOString(),
   };
@@ -1185,6 +1188,7 @@ function enterProjectReviewMode() {
   const rememberedSupportLineIds = rememberSupportLineSelection(state.lastSupportLineIds ?? []);
   finishLoadedActiveSectionIfReal();
   state.mappingStarted = false;
+  state.reviewMode = true;
   setSelectedReferenceLineIds([]);
   clearActiveReachLock();
   state.draftFieldReach = [];
@@ -1202,6 +1206,7 @@ function enterProjectReviewMode() {
 function enterProjectContinueMode() {
   const restoreIds = cleanSupportLineIds(state.lastSupportLineIds ?? []);
   state.mappingStarted = false;
+  state.reviewMode = false;
   setSelectedReferenceLineIds(restoreIds);
   setActiveReachIds([]);
   state.activeReachGeometry = [];
@@ -1295,6 +1300,7 @@ function openWatercourse(name, saveCurrent = true, options = {}) {
     clearActiveReachLock();
     state.draftFieldReach = [];
     state.mappingStarted = false;
+    state.reviewMode = false;
     state.projectMeta = defaultProjectMeta();
     syncProjectMetaToForm();
     syncProjectChoices();
@@ -2679,8 +2685,9 @@ function renderLists() {
     referenceLineList.append(li);
   });
 
-  fieldStepPanel.classList.toggle("hidden", state.mappingStarted);
-  mappingWorkspace.classList.toggle("hidden", !state.mappingStarted);
+  const showReviewWorkspace = state.mappingStarted || state.reviewMode;
+  fieldStepPanel.classList.toggle("hidden", showReviewWorkspace);
+  mappingWorkspace.classList.toggle("hidden", !showReviewWorkspace);
   fieldStatusLabel.textContent = state.draftFieldReach.length
     ? state.draftFieldReach.length > 1
       ? "Stödlinje redo"
@@ -2772,6 +2779,7 @@ function render() {
 }
 
 function startObjectPlacement(tool) {
+  if (!state.mappingStarted && state.reviewMode) state.reviewMode = true;
   clearSelectedObject();
   state.tempObject = null;
   objectComment.value = "";
@@ -3571,6 +3579,7 @@ function prepareFieldArea() {
 }
 
 function startMapping() {
+  state.reviewMode = false;
   if (state.mappingStarted) {
     fieldStatusLabel.textContent = "Kartering är redan startad. Byt vattendrag för att välja annan sträcka.";
     return;
@@ -4111,6 +4120,7 @@ drawFieldReachButton.addEventListener("click", () => {
     fieldStatusLabel.textContent = "Kartering är startad. Byt vattendrag för att rita ny stödlinje.";
     return;
   }
+  state.reviewMode = false;
   state.draftFieldReach = [];
   clearActiveReachLock({ clearSelection: true });
   clearTemporaryDrawingState();
