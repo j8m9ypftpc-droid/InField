@@ -130,7 +130,7 @@
                 <span class="switch-track"><span class="switch-thumb"></span></span>
                 <span class="switch-label">GPS</span>
               </button>
-              <span id="app-version-label" class="app-version-label" title="Aktuell appversion">V2.2.6</span>
+              <span id="app-version-label" class="app-version-label" title="Aktuell appversion">V2.2.9</span>
               <button id="debug-log-button" class="debug-log-button hidden" type="button" aria-live="polite">Bugglogg</button>
             </div>
             <button id="center-gps-button" class="quiet-button">Centrera</button>
@@ -228,12 +228,12 @@
             <button class="secondary-button" data-object-tool="line">Ny linje</button>
             <button class="secondary-button" data-object-tool="area">Ny yta</button>
           </div>
-          <div class="draw-actions">
+          <div id="draw-actions" class="draw-actions hidden">
             <button id="undo-draw-button" class="quiet-button" disabled>Bakåt</button>
             <button id="finish-draw-button" class="quiet-button" disabled>Klar</button>
             <button id="cancel-draw-button" class="quiet-button" disabled>Avbryt</button>
           </div>
-          <div class="field-group">
+          <div class="field-group hidden">
             <label for="object-type">Objekttyp</label>
             <select id="object-type">
               <option>Vandringshinder</option>
@@ -245,15 +245,15 @@
               <option>Åtgärdspunkt</option>
             </select>
           </div>
-          <div class="field-group">
+          <div class="field-group hidden">
             <label for="object-comment">Objektkommentar</label>
             <textarea id="object-comment" rows="3" placeholder="Kommentar till nästa objekt"></textarea>
           </div>
-          <div class="object-edit-actions">
+          <div class="object-edit-actions hidden">
             <button id="save-object-button" class="secondary-button" disabled>Spara objekt</button>
             <button id="cancel-object-edit-button" class="quiet-button" disabled>Avmarkera</button>
           </div>
-          <div class="photo-panel">
+          <div class="photo-panel hidden">
             <button id="add-object-photo-button" class="secondary-button" disabled>Lägg till foto på valt objekt</button>
             <input id="object-photo-input" type="file" accept="image/*" capture="environment" hidden />
           </div>
@@ -271,6 +271,6 @@
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://unpkg.com/jszip@3.10.1/dist/jszip.min.js"></script>
-    <script src="./app.js?v=2.2.6"></script>
+    <script src="./app.js?v=2.2.9"></script>
   </body>
 </html>

@@ -257,7 +257,7 @@ const fallbackObjectTypes = [
 ];
 
 const defaultMapCenter = [60.965, 16.44];
-const APP_VERSION_LABEL = "V2.2.6";
+const APP_VERSION_LABEL = "V2.2.9";
 const SUPPORT_LINE_MERGE_TOLERANCE_METERS = 10;
 const MANUAL_SUPPORT_LINE_GAP_TOLERANCE_METERS = 30;
 const MANUAL_SUPPORT_LINE_HARD_GAP_LIMIT_METERS = 250;
@@ -342,6 +342,7 @@ const objectSectionLabel = document.querySelector("#object-section-label");
 const undoDrawButton = document.querySelector("#undo-draw-button");
 const finishDrawButton = document.querySelector("#finish-draw-button");
 const cancelDrawButton = document.querySelector("#cancel-draw-button");
+const drawActions = document.querySelector("#draw-actions");
 const saveObjectButton = document.querySelector("#save-object-button");
 const cancelObjectEditButton = document.querySelector("#cancel-object-edit-button");
 const addObjectPhotoButton = document.querySelector("#add-object-photo-button");
@@ -1988,7 +1989,6 @@ function selectObject(id) {
   cancelObjectEditButton.disabled = false;
   addObjectPhotoButton.disabled = object.pending || !object.typeLabel;
   render();
-  objectType.focus();
 }
 
 function clearSelectedObject(options = {}) {
@@ -2006,7 +2006,6 @@ function saveSelectedObject() {
   if (!object) return;
   if (!objectType.value) {
     fieldStatusLabel.textContent = "Välj objekttyp innan du sparar objektet.";
-    objectType.focus();
     updateObjectEditActions();
     return;
   }
@@ -2738,6 +2737,7 @@ function renderStatus() {
   );
   lengthLabel.textContent = state.activeSection?.points.length > 1 ? formatLength(state.activeSection.points) : "0 m";
   const drawCount = state.tempObject?.points.length ?? 0;
+  drawActions?.classList.toggle("hidden", !state.tempObject);
   undoDrawButton.disabled = drawCount === 0;
   cancelDrawButton.disabled = drawCount === 0;
   finishDrawButton.disabled =
@@ -2788,10 +2788,11 @@ function startObjectPlacement(tool) {
 }
 
 function selectNewObjectForDetails(objectId, tool) {
+  const object = state.objects.find((item) => item.id === objectId);
   selectObject(objectId);
-  updateObjectTypeSelect(tool, "");
-  objectType.value = "";
-  objectComment.value = "";
+  updateObjectTypeSelect(tool, object?.typeLabel ?? "");
+  objectType.value = object?.typeLabel ?? "";
+  objectComment.value = object?.comment ?? "";
   updateObjectEditActions();
   fieldStatusLabel.textContent = "Välj objekttyp och kommentar, tryck sedan Spara objekt.";
 }
@@ -2802,8 +2803,8 @@ function addObjectPoint(point) {
   const object = {
     id: crypto.randomUUID(),
     sectionId: activeOrLast.id,
-    typeLabel: "",
-    comment: "",
+    typeLabel: objectType.value,
+    comment: objectComment.value,
     pending: true,
     geometry: { type: "Point", coordinates: point },
   };
@@ -2831,8 +2832,8 @@ function finishObjectDrawing() {
   state.objects.push({
     id: crypto.randomUUID(),
     sectionId: activeOrLast.id,
-    typeLabel: "",
-    comment: "",
+    typeLabel: objectType.value,
+    comment: objectComment.value,
     pending: true,
     geometry,
   });
