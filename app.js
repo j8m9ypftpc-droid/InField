@@ -1414,16 +1414,19 @@ function setActiveReachFromSelectedLines() {
 
 function previewSelectedReferenceLines() {
   const lines = selectedReferenceLines();
-  const geometry = lines.length ? combinedReferenceLinePoints(lines) : [];
+  const connection = lines.length ? connectedReferenceLineGeometry(lines) : { points: [], maxGap: 0 };
+  const geometry = connection.maxGap > MANUAL_SUPPORT_LINE_GAP_TOLERANCE_METERS ? [] : connection.points;
   state.draftFieldReach = geometry;
   setActiveReachIds([]);
   state.activeReachGeometry = [];
-  state.reachWorkflowState = geometry.length > 1 ? "watercourse_selected" : "idle";
+  state.reachWorkflowState = lines.length ? "watercourse_selected" : "idle";
   console.info("[InField reach] Stödlinje vald som kandidat.", {
     selectedSupportLines: selectedReferenceLineIds(),
     activeSegmentId: state.activeSegmentId,
     activeSegmentIds: state.activeSegmentIds,
-    points: geometry.length,
+    points: connection.points.length,
+    previewPoints: geometry.length,
+    maxGapMeters: connection.maxGap,
   });
   return geometry;
 }
@@ -1475,9 +1478,12 @@ function activateSelectedReferenceLines(options = {}) {
     return;
   }
   fieldStatusLabel.textContent = "Stödlinje redo";
+  const connection = connectedReferenceLineGeometry(lines);
   mapHint.textContent = lines.length === 1
     ? "Stödlinje vald. Tryck Starta kartering för att låsa den."
-    : `${lines.length} stödlinjer valda. Tryck Starta kartering för att låsa sträckan.`;
+    : connection.maxGap > MANUAL_SUPPORT_LINE_GAP_TOLERANCE_METERS
+      ? `${lines.length} stödlinjer valda. Glapp ${Math.round(connection.maxGap)} m accepteras först när du startar karteringen.`
+      : `${lines.length} stödlinjer valda. Tryck Starta kartering för att låsa sträckan.`;
   sideMapHint.textContent = mapHint.textContent;
   if (options.fit && state.draftFieldReach.length > 1) fitMapToPoints(state.draftFieldReach);
 }
