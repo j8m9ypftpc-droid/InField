@@ -72,6 +72,7 @@ const protocolOptions = {
   kulverterad: ["Nej", "Ja"],
   avstangd: ["Nej", "Ja"],
 };
+const replacementMaterialFractions = ["0-32", "32-64", "64-128", "128-256", "256-512", "Block", "Metersblock"];
 
 const protocolGroups = [
   {
@@ -201,12 +202,12 @@ const protocolGroups = [
     fields: [
       { key: "atgardsbehov", label: "Åtgärdsbehov", type: "binary" },
       { key: "ersattningsmaterialStracka", label: "Behövs ersättningsmaterial på sträckan?", type: "binary", showIf: (a) => String(a.hymotyp ?? "").startsWith("B") },
-      { key: "ersattningsmaterialMangd", label: "Mängd ersättningsmaterial", type: "text", showIf: (a) => String(a.hymotyp ?? "").startsWith("B") && a.ersattningsmaterialStracka === "Ja" },
+      { key: "ersattningsmaterialMangd", label: "Mängd ersättningsmaterial (ton)", type: "decimal", showIf: (a) => String(a.hymotyp ?? "").startsWith("B") && a.ersattningsmaterialStracka === "Ja" },
       {
-        key: "ersattningsmaterialFraktion",
-        label: "Fraktion",
-        type: "buttons",
-        options: ["0-32", "32-64", "64-128", "128-256", "256-512", "Block", "Metersblock"],
+        key: "ersattningsmaterialFraktioner",
+        label: "Fraktioner och blandning (%)",
+        type: "fractionMix",
+        options: replacementMaterialFractions,
         showIf: (a) => String(a.hymotyp ?? "").startsWith("B") && a.ersattningsmaterialStracka === "Ja",
       },
       {
@@ -256,7 +257,7 @@ const fallbackObjectTypes = [
 ];
 
 const defaultMapCenter = [60.965, 16.44];
-const APP_VERSION_LABEL = "V2.2.4";
+const APP_VERSION_LABEL = "V2.2.6";
 const SUPPORT_LINE_MERGE_TOLERANCE_METERS = 10;
 const MANUAL_SUPPORT_LINE_GAP_TOLERANCE_METERS = 30;
 const MANUAL_SUPPORT_LINE_HARD_GAP_LIMIT_METERS = 250;
@@ -1105,7 +1106,7 @@ function saveProject(options = {}) {
     nextSectionNumber: state.nextSectionNumber,
     activeSection: state.activeSection,
     sections: cleanSavedSections(state.sections),
-    objects: state.objects,
+    objects: savedObjects(),
     photos: state.photos,
     fieldPackages: state.fieldPackages,
     referenceLines: state.referenceLines,
@@ -1144,7 +1145,7 @@ function currentProjectHasWork() {
   return (
     cleanSavedSections(state.sections).length > 0 ||
     hasSectionGeometry(state.activeSection) ||
-    state.objects.length > 0 ||
+    savedObjects().length > 0 ||
     state.photos.length > 0 ||
     state.fieldPackages.length > 0 ||
     state.referenceLines.length > 0 ||
@@ -1252,7 +1253,7 @@ function openWatercourse(name, saveCurrent = true, options = {}) {
     const payload = JSON.parse(saved);
     state.activeSection = payload.activeSection ? normalizeSectionAttributes(payload.activeSection) : null;
     state.sections = cleanSavedSections((payload.sections ?? []).map(normalizeSectionAttributes));
-    state.objects = (payload.objects ?? []).map(normalizeObjectGeometry);
+    state.objects = savedObjects((payload.objects ?? []).map(normalizeObjectGeometry));
     state.photos = payload.photos ?? [];
     state.fieldPackages = (payload.fieldPackages ?? []).map(normalizeFieldPackage);
     state.referenceLines = (payload.referenceLines ?? []).map(normalizeReferenceLine);
@@ -1331,7 +1332,7 @@ function syncProjectChoices() {
 function defaultProtocolAttributes() {
   const attributes = {};
   protocolGroups.flatMap((group) => group.fields).forEach((field) => {
-    attributes[field.key] = field.type === "binary" ? "Nej" : "";
+    attributes[field.key] = field.type === "binary" ? "Nej" : field.type === "fractionMix" ? {} : "";
   });
   attributes.efterAtgardDatum = new Date().toISOString().slice(0, 10);
   attributes.efterAtgardUtforare = state.projectMeta?.inventor ?? "";
@@ -1354,8 +1355,46 @@ function groupVisibleForPart(group, attrs) {
 
 function normalizeSectionAttributes(section) {
   section.attributes = { ...defaultProtocolAttributes(), ...(section.attributes ?? {}) };
+  if (
+    section.attributes.ersattningsmaterialFraktion &&
+    !Object.keys(normalizeReplacementMaterialMix(section.attributes.ersattningsmaterialFraktioner)).length
+  ) {
+    section.attributes.ersattningsmaterialFraktioner = {
+      [section.attributes.ersattningsmaterialFraktion]: "100",
+    };
+  }
+  section.attributes.ersattningsmaterialFraktioner = normalizeReplacementMaterialMix(
+    section.attributes.ersattningsmaterialFraktioner,
+  );
   section.points = normalizePoints(section.points ?? []);
   return section;
+}
+
+function normalizeReplacementMaterialMix(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([fraction]) => replacementMaterialFractions.includes(fraction))
+      .map(([fraction, percent]) => [fraction, String(percent ?? "").trim()]),
+  );
+}
+
+function formatReplacementMaterialMix(value) {
+  return Object.entries(normalizeReplacementMaterialMix(value))
+    .map(([fraction, percent]) => `${fraction}: ${percent || "0"}%`)
+    .join(", ");
+}
+
+function replacementMaterialMixTotal(value) {
+  return Object.values(normalizeReplacementMaterialMix(value)).reduce((sum, percent) => sum + (Number(percent) || 0), 0);
+}
+
+function exportProtocolAttributes(attributes = {}) {
+  const exported = { ...attributes };
+  const mix = normalizeReplacementMaterialMix(exported.ersattningsmaterialFraktioner);
+  exported.ersattningsmaterialFraktioner = formatReplacementMaterialMix(mix);
+  exported.ersattningsmaterialBlandningSumma = Object.keys(mix).length ? replacementMaterialMixTotal(mix) : "";
+  return exported;
 }
 
 function normalizeObjectGeometry(object) {
@@ -1865,6 +1904,22 @@ function deleteObject(id) {
   render();
 }
 
+function savedObjects(objects = state.objects) {
+  return objects.filter((object) => !object.pending);
+}
+
+function selectedObject() {
+  return state.objects.find((item) => item.id === state.selectedObjectId) ?? null;
+}
+
+function updateObjectEditActions() {
+  const object = selectedObject();
+  const canSave = Boolean(object && objectType.value);
+  saveObjectButton.disabled = !canSave;
+  cancelObjectEditButton.disabled = !object;
+  addObjectPhotoButton.disabled = !object || object.pending || !object.typeLabel;
+}
+
 function currentSectionForObjects() {
   return state.activeSection ?? state.sections.at(-1) ?? null;
 }
@@ -1929,26 +1984,36 @@ function selectObject(id) {
   updateObjectTypeSelect(objectGeometryTool(object), object.typeLabel);
   objectType.value = object.typeLabel;
   objectComment.value = object.comment ?? "";
-  saveObjectButton.disabled = false;
+  updateObjectEditActions();
   cancelObjectEditButton.disabled = false;
-  addObjectPhotoButton.disabled = false;
+  addObjectPhotoButton.disabled = object.pending || !object.typeLabel;
   render();
+  objectType.focus();
 }
 
-function clearSelectedObject() {
+function clearSelectedObject(options = {}) {
+  const object = selectedObject();
+  if (object?.pending && options.discardPending !== false) {
+    state.objects = state.objects.filter((item) => item.id !== object.id);
+  }
   state.selectedObjectId = null;
   state.objectEditDraft = null;
-  saveObjectButton.disabled = true;
-  cancelObjectEditButton.disabled = true;
-  addObjectPhotoButton.disabled = true;
+  updateObjectEditActions();
 }
 
 function saveSelectedObject() {
   const object = state.objects.find((item) => item.id === state.selectedObjectId);
   if (!object) return;
+  if (!objectType.value) {
+    fieldStatusLabel.textContent = "Välj objekttyp innan du sparar objektet.";
+    objectType.focus();
+    updateObjectEditActions();
+    return;
+  }
   object.typeLabel = objectType.value;
   object.comment = objectComment.value;
-  clearSelectedObject();
+  object.pending = false;
+  clearSelectedObject({ discardPending: false });
   saveProject();
   render();
 }
@@ -1960,9 +2025,15 @@ function saveInlineObject(id) {
   const commentField = document.querySelector(`[data-inline-object-comment="${id}"]`);
   object.typeLabel = state.objectEditDraft?.id === id ? state.objectEditDraft.typeLabel : typeField.value;
   object.comment = state.objectEditDraft?.id === id ? state.objectEditDraft.comment : commentField.value;
+  if (!object.typeLabel) {
+    fieldStatusLabel.textContent = "Välj objekttyp innan du sparar objektet.";
+    typeField?.focus();
+    return;
+  }
+  object.pending = false;
   objectType.value = object.typeLabel;
   objectComment.value = object.comment;
-  clearSelectedObject();
+  clearSelectedObject({ discardPending: false });
   saveProject();
   render();
 }
@@ -1974,7 +2045,7 @@ function objectGeometryTool(object) {
 }
 
 function objectStyleClass(typeLabel) {
-  const normalized = typeLabel.toLowerCase();
+  const normalized = String(typeLabel ?? "").toLowerCase();
   if (normalized === "sidogren") return "sidogren";
   if (normalized === "översvämningsyta" || normalized === "oversvamningsyta") return "oversvamningsyta";
   return "";
@@ -1996,15 +2067,17 @@ function orderedObjectTypes(tool, selected = "") {
 
 function updateObjectTypeSelect(tool = state.tool, selected = objectType.value) {
   const normalizedTool = ["point", "line", "area"].includes(tool) ? tool : "point";
-  objectType.innerHTML = orderedObjectTypes(normalizedTool, selected)
-    .map((value) => `<option${value === selected ? " selected" : ""}>${value}</option>`)
-    .join("");
+  objectType.innerHTML = [
+    `<option value=""${selected ? "" : " selected"}>Välj objekttyp</option>`,
+    ...orderedObjectTypes(normalizedTool, selected).map((value) => `<option${value === selected ? " selected" : ""}>${value}</option>`),
+  ].join("");
 }
 
 function objectTypeOptions(tool, selected) {
-  return orderedObjectTypes(tool, selected)
-    .map((value) => `<option${value === selected ? " selected" : ""}>${value}</option>`)
-    .join("");
+  return [
+    `<option value=""${selected ? "" : " selected"}>Välj objekttyp</option>`,
+    ...orderedObjectTypes(tool, selected).map((value) => `<option${value === selected ? " selected" : ""}>${value}</option>`),
+  ].join("");
 }
 
 function syncFormToProtocol(options = {}) {
@@ -2088,6 +2161,11 @@ function renderProtocolField(field) {
     return wrapper;
   }
 
+  if (field.type === "fractionMix") {
+    wrapper.append(renderFractionMixField(field));
+    return wrapper;
+  }
+
   const input = document.createElement(field.type === "textarea" ? "textarea" : field.type === "select" ? "select" : "input");
   input.dataset.protocolInput = field.key;
   if (field.type === "computed") {
@@ -2118,6 +2196,70 @@ function renderProtocolField(field) {
   });
   wrapper.append(input);
   return wrapper;
+}
+
+function renderFractionMixField(field) {
+  const attrs = state.activeSection?.attributes ?? {};
+  const mix = normalizeReplacementMaterialMix(attrs[field.key]);
+  const grid = document.createElement("div");
+  grid.className = "fraction-mix-grid";
+  const summary = document.createElement("small");
+  const updateSummary = (nextMix) => {
+    const total = replacementMaterialMixTotal(nextMix);
+    summary.className = total === 100 || !Object.keys(nextMix).length ? "fraction-mix-summary" : "fraction-mix-summary warning";
+    summary.textContent = Object.keys(nextMix).length ? `Summa ${total}%.` : "Bocka i en eller flera storlekar och ange procent.";
+  };
+
+  field.options.forEach((option) => {
+    const checked = Object.prototype.hasOwnProperty.call(mix, option);
+    const row = document.createElement("label");
+    row.className = "fraction-mix-row";
+
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = checked;
+
+    const name = document.createElement("span");
+    name.textContent = option;
+
+    const percent = document.createElement("input");
+    percent.type = "number";
+    percent.min = "0";
+    percent.max = "100";
+    percent.step = "1";
+    percent.placeholder = "%";
+    percent.value = checked ? mix[option] : "";
+    percent.disabled = !checked;
+
+    const updateMix = () => {
+      if (!state.activeSection) createSection();
+      const next = normalizeReplacementMaterialMix(state.activeSection.attributes[field.key]);
+      if (checkbox.checked) next[option] = percent.value;
+      else delete next[option];
+      state.activeSection.attributes[field.key] = next;
+      updateSummary(next);
+      saveProject();
+    };
+
+    checkbox.addEventListener("change", () => {
+      percent.disabled = !checkbox.checked;
+      if (checkbox.checked && !percent.value) percent.value = "";
+      updateMix();
+    });
+    percent.addEventListener("input", () => {
+      checkbox.checked = true;
+      percent.disabled = false;
+      updateMix();
+    });
+
+    row.append(checkbox, name, percent);
+    grid.append(row);
+  });
+
+  updateSummary(mix);
+  grid.append(summary);
+
+  return grid;
 }
 
 function updateCalculatedProtocolFields() {
@@ -2470,7 +2612,7 @@ function renderLists() {
     .forEach((section) => {
     const li = document.createElement("li");
     li.className = state.activeSection?.id === section.id ? "selected" : "";
-    const objectCount = state.objects.filter((object) => object.sectionId === section.id).length;
+    const objectCount = savedObjects().filter((object) => object.sectionId === section.id).length;
     li.innerHTML = `<strong>Sträcka ${section.number}: ${section.attributes.hymotyp || "HyMotyp saknas"}</strong><span>${formatLength(section.points)} · ${section.attributes.rensning || "Rensning ej ifylld"} · ${objectCount} objekt</span><div class="list-actions"><button class="quiet-button" data-edit-section="${section.id}">Redigera</button><button class="danger-button" data-delete-section="${section.id}">Ta bort</button></div>`;
     sectionList.append(li);
     });
@@ -2492,9 +2634,12 @@ function renderLists() {
         : object.geometry.type === "LineString"
           ? "Linje"
           : "Yta";
+    const typeLabel = draft.typeLabel || "Välj objekttyp";
+    const saveDisabled = !draft.typeLabel ? "disabled" : "";
+    const pendingText = object.pending ? " · osparat objekt" : "";
     li.innerHTML = isSelected
-      ? `<strong>${draft.typeLabel}</strong><span>${geometryLabel} · Sträcka ${section?.number ?? "-"}</span><div class="inline-editor"><label>Objekttyp</label><select data-inline-object-type="${object.id}">${objectTypeOptions(objectGeometryTool(object), draft.typeLabel)}</select><label>Kommentar</label><textarea rows="3" data-inline-object-comment="${object.id}">${draft.comment || ""}</textarea></div>${objectPhotoMarkup(object.id)}<div class="list-actions"><button class="secondary-button" data-save-object="${object.id}">Spara</button><button class="quiet-button" data-cancel-object="${object.id}">Avbryt</button><button class="danger-button" data-delete-object="${object.id}">Ta bort</button></div>`
-      : `<strong>${object.typeLabel}</strong><span>${geometryLabel} · Sträcka ${section?.number ?? "-"} · ${object.comment || "Ingen kommentar"}</span><div class="list-actions"><button class="quiet-button" data-edit-object="${object.id}">Ändra</button><button class="danger-button" data-delete-object="${object.id}">Ta bort</button></div>`;
+      ? `<strong>${typeLabel}</strong><span>${geometryLabel} · Sträcka ${section?.number ?? "-"}${pendingText}</span><div class="inline-editor"><label>Objekttyp</label><select data-inline-object-type="${object.id}">${objectTypeOptions(objectGeometryTool(object), draft.typeLabel)}</select><label>Kommentar</label><textarea rows="3" data-inline-object-comment="${object.id}">${draft.comment || ""}</textarea></div>${object.pending ? "" : objectPhotoMarkup(object.id)}<div class="list-actions"><button class="secondary-button" data-save-object="${object.id}" ${saveDisabled}>Spara</button><button class="quiet-button" data-cancel-object="${object.id}">Avbryt</button><button class="danger-button" data-delete-object="${object.id}">Ta bort</button></div>`
+      : `<strong>${object.typeLabel || "Objekttyp saknas"}</strong><span>${geometryLabel} · Sträcka ${section?.number ?? "-"} · ${object.comment || "Ingen kommentar"}</span><div class="list-actions"><button class="quiet-button" data-edit-object="${object.id}">Ändra</button><button class="danger-button" data-delete-object="${object.id}">Ta bort</button></div>`;
     objectList.append(li);
   });
 
@@ -2611,9 +2756,7 @@ function renderStatus() {
       ? "Klicka i kartan för grön startpunkt och bekräfta med Starta sträcka."
       : "Klicka i kartan för röd stoppunkt och avsluta delsträckan.";
   }
-  const objectIsSelected = Boolean(state.selectedObjectId);
-  saveObjectButton.disabled = !objectIsSelected;
-  cancelObjectEditButton.disabled = !objectIsSelected;
+  updateObjectEditActions();
   sideMapHint.textContent = mapHint.textContent;
 }
 
@@ -2628,19 +2771,44 @@ function render() {
   syncProtocolToForm();
 }
 
+function startObjectPlacement(tool) {
+  clearSelectedObject();
+  state.tempObject = null;
+  objectComment.value = "";
+  updateObjectTypeSelect(tool, "");
+  activateTab("objects");
+  setTool(tool);
+  mapHint.textContent =
+    tool === "point"
+      ? "Klicka ut punkten i kartan. Välj sedan objekttyp och spara."
+      : tool === "line"
+        ? "Klicka ut linjen i kartan och tryck Klar. Välj sedan objekttyp och spara."
+        : "Klicka ut ytan i kartan och tryck Klar. Välj sedan objekttyp och spara.";
+  sideMapHint.textContent = mapHint.textContent;
+}
+
+function selectNewObjectForDetails(objectId, tool) {
+  selectObject(objectId);
+  updateObjectTypeSelect(tool, "");
+  objectType.value = "";
+  objectComment.value = "";
+  updateObjectEditActions();
+  fieldStatusLabel.textContent = "Välj objekttyp och kommentar, tryck sedan Spara objekt.";
+}
+
 function addObjectPoint(point) {
   const activeOrLast = state.activeSection ?? state.sections.at(-1);
   if (!activeOrLast) return false;
-  state.objects.push({
+  const object = {
     id: crypto.randomUUID(),
     sectionId: activeOrLast.id,
-    typeLabel: objectType.value,
-    comment: objectComment.value,
+    typeLabel: "",
+    comment: "",
+    pending: true,
     geometry: { type: "Point", coordinates: point },
-  });
-  objectComment.value = "";
-  clearSelectedObject();
-  saveProject();
+  };
+  state.objects.push(object);
+  selectNewObjectForDetails(object.id, "point");
   return true;
 }
 
@@ -2663,14 +2831,15 @@ function finishObjectDrawing() {
   state.objects.push({
     id: crypto.randomUUID(),
     sectionId: activeOrLast.id,
-    typeLabel: objectType.value,
-    comment: objectComment.value,
+    typeLabel: "",
+    comment: "",
+    pending: true,
     geometry,
   });
+  const objectId = state.objects.at(-1).id;
   state.tempObject = null;
-  objectComment.value = "";
-  clearSelectedObject();
-  saveProject();
+  selectNewObjectForDetails(objectId, state.tool);
+  setTool("pan");
   render();
 }
 
@@ -3507,7 +3676,7 @@ async function exportGeoJson(projectPayload = null) {
         projectMeta: projectPayload.projectMeta ?? {},
         sections: projectPayload.sections ?? [],
         activeSection: projectPayload.activeSection ?? null,
-        objects: projectPayload.objects ?? [],
+        objects: savedObjects(projectPayload.objects ?? []),
         photos: projectPayload.photos ?? [],
         fieldPackages: projectPayload.fieldPackages ?? [],
         referenceLines: projectPayload.referenceLines ?? [],
@@ -3530,12 +3699,12 @@ async function exportGeoJson(projectPayload = null) {
         length: formatLength(sectionPoints),
         koordinater: coordinateSystem,
         ...pointSummary(sectionPoints),
-        ...section.attributes,
+        ...exportProtocolAttributes(section.attributes),
       },
       geometry: geometryToGeo({ type: "LineString", coordinates: sectionPoints }),
     };
   });
-  const objectFeatures = exportState.objects.map((object) => {
+  const objectFeatures = savedObjects(exportState.objects).map((object) => {
     const section = exportSections.find((item) => item.id === object.sectionId) ?? exportState.activeSection;
     return {
     type: "Feature",
@@ -3894,7 +4063,7 @@ supportLine.classList.toggle("hidden", !state.useSupportLine);
 initBackgroundMap();
 setTheme(localStorage.getItem(THEME_KEY) ?? "dark");
 renderProtocolFields();
-updateObjectTypeSelect("point", "Bestämmande sektion");
+updateObjectTypeSelect("point", "");
 syncLantmaterietTokenInput();
 renderProjectList();
 showStartScreen();
@@ -3932,8 +4101,7 @@ themeToggleButton?.addEventListener("click", () => {
 
 document.querySelectorAll("[data-object-tool]").forEach((button) => {
   button.addEventListener("click", () => {
-    activateTab("objects");
-    setTool(button.dataset.objectTool);
+    startObjectPlacement(button.dataset.objectTool);
   });
 });
 
@@ -4056,7 +4224,8 @@ sectionPhotoInput.addEventListener("change", () => {
 });
 objectPhotoInput.addEventListener("change", () => {
   const file = objectPhotoInput.files?.[0];
-  if (state.selectedObjectId && file) addPhoto("object", state.selectedObjectId, file);
+  const object = selectedObject();
+  if (object && !object.pending && file) addPhoto("object", object.id, file);
   objectPhotoInput.value = "";
 });
 mapPhotoInput.addEventListener("change", () => {
@@ -4093,6 +4262,27 @@ cancelObjectEditButton.addEventListener("click", () => {
   clearSelectedObject();
   objectComment.value = "";
   render();
+});
+objectType.addEventListener("change", () => {
+  const object = selectedObject();
+  if (object) {
+    state.objectEditDraft = {
+      id: object.id,
+      typeLabel: objectType.value,
+      comment: objectComment.value,
+    };
+  }
+  updateObjectEditActions();
+  render();
+});
+objectComment.addEventListener("input", () => {
+  const object = selectedObject();
+  if (!object) return;
+  state.objectEditDraft = {
+    id: object.id,
+    typeLabel: objectType.value,
+    comment: objectComment.value,
+  };
 });
 openWatercourseButton.addEventListener("click", () => openWatercourse(watercourseInput.value));
 newWatercourseButton.addEventListener("click", newWatercourse);
@@ -4136,6 +4326,7 @@ objectList.addEventListener("input", (event) => {
     state.objectEditDraft = { id: commentId, typeLabel: object?.typeLabel ?? objectType.value, comment: "" };
   }
   state.objectEditDraft.comment = event.target.value;
+  if (state.selectedObjectId === commentId) objectComment.value = event.target.value;
 });
 objectList.addEventListener("change", (event) => {
   const typeId = event.target.dataset.inlineObjectType;
@@ -4145,6 +4336,12 @@ objectList.addEventListener("change", (event) => {
     state.objectEditDraft = { id: typeId, typeLabel: object?.typeLabel ?? event.target.value, comment: object?.comment ?? "" };
   }
   state.objectEditDraft.typeLabel = event.target.value;
+  const saveButton = objectList.querySelector(`[data-save-object="${typeId}"]`);
+  if (saveButton) saveButton.disabled = !event.target.value;
+  if (state.selectedObjectId === typeId) {
+    objectType.value = event.target.value;
+    updateObjectEditActions();
+  }
 });
 map.addEventListener("click", handleMapClick);
 map.addEventListener("pointerdown", startDrag);
