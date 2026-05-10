@@ -256,7 +256,7 @@ const fallbackObjectTypes = [
 ];
 
 const defaultMapCenter = [60.965, 16.44];
-const APP_VERSION_LABEL = "V2.2.2";
+const APP_VERSION_LABEL = "V2.2.3";
 const SUPPORT_LINE_MERGE_TOLERANCE_METERS = 10;
 const MANUAL_SUPPORT_LINE_GAP_TOLERANCE_METERS = 30;
 const MANUAL_SUPPORT_LINE_HARD_GAP_LIMIT_METERS = 250;
@@ -1140,6 +1140,18 @@ function cleanSavedSections(sections = []) {
   return sections.filter(hasSectionGeometry);
 }
 
+function currentProjectHasWork() {
+  return (
+    cleanSavedSections(state.sections).length > 0 ||
+    hasSectionGeometry(state.activeSection) ||
+    state.objects.length > 0 ||
+    state.photos.length > 0 ||
+    state.fieldPackages.length > 0 ||
+    state.referenceLines.length > 0 ||
+    state.mappingStarted
+  );
+}
+
 function finishLoadedActiveSectionIfReal() {
   if (!state.activeSection) return;
   if (!hasSectionGeometry(state.activeSection)) {
@@ -1216,7 +1228,14 @@ function openWatercourse(name, saveCurrent = true, options = {}) {
   }
   const openMode = options.mode ?? "review";
   const cleanName = name.trim() || "Nytt vattendrag";
-  if (saveCurrent && state.activeSection) {
+  const isOpeningCurrentProject = storageKey(cleanName) === storageKey();
+  const shouldSaveCurrent = saveCurrent && (!isOpeningCurrentProject || currentProjectHasWork());
+  if (saveCurrent && isOpeningCurrentProject && !currentProjectHasWork()) {
+    console.info("[Project] Öppnar samma vattendrag utan att spara tomt startläge över befintlig lokal kopia.", {
+      watercourse: cleanName,
+    });
+  }
+  if (shouldSaveCurrent && state.activeSection) {
     if (hasSectionGeometry(state.activeSection)) {
       persistActiveSectionAsDraft();
     } else {
@@ -1224,7 +1243,7 @@ function openWatercourse(name, saveCurrent = true, options = {}) {
       state.nextSectionNumber = nextSectionNumber();
     }
   }
-  if (saveCurrent) saveProject();
+  if (shouldSaveCurrent) saveProject();
   state.watercourse = cleanName;
   watercourseInput.value = cleanName;
   watercourseLabel.textContent = cleanName;
@@ -2539,7 +2558,8 @@ function renderSectionPhotos() {
 }
 
 function renderStatus() {
-  const currentNumber = state.activeSection?.number ?? state.nextSectionNumber;
+  const hasSavedSections = cleanSavedSections(state.sections).length > 0;
+  const currentNumber = state.activeSection?.number ?? (hasSavedSections ? state.nextSectionNumber : "saknas");
   sectionNumber.textContent = currentNumber;
   activeState.textContent = state.activeSection
     ? state.activeSection.editingExisting
@@ -2549,7 +2569,9 @@ function renderStatus() {
       : state.activeSection.points.length < 2
         ? "Välj röd stoppunkt"
         : "Redo att avsluta"
-    : "Ej startad";
+    : hasSavedSections
+      ? "Ej startad"
+      : "Inga sparade delsträckor";
   startStopButton.textContent = state.activeSection
     ? state.activeSection.editingExisting
       ? "Spara och avsluta"
