@@ -256,7 +256,7 @@ const fallbackObjectTypes = [
 ];
 
 const defaultMapCenter = [60.965, 16.44];
-const APP_VERSION_LABEL = "V2.2.3";
+const APP_VERSION_LABEL = "V2.2.4";
 const SUPPORT_LINE_MERGE_TOLERANCE_METERS = 10;
 const MANUAL_SUPPORT_LINE_GAP_TOLERANCE_METERS = 30;
 const MANUAL_SUPPORT_LINE_HARD_GAP_LIMIT_METERS = 250;
@@ -2500,12 +2500,17 @@ function renderLists() {
 
   referenceLineList.innerHTML = "";
   const selectedLines = selectedReferenceLines();
-  startMappingButton.disabled = state.mappingStarted || (state.draftFieldReach.length < 2 && !selectedLines.length);
+  const selectedLineConnection = selectedLines.length ? connectedReferenceLineGeometry(selectedLines) : { maxGap: 0 };
+  const selectedLinesHaveHardGap = selectedLineConnection.maxGap > MANUAL_SUPPORT_LINE_HARD_GAP_LIMIT_METERS;
+  startMappingButton.disabled = state.mappingStarted || selectedLinesHaveHardGap || (state.draftFieldReach.length < 2 && !selectedLines.length);
+  startMappingButton.textContent = selectedLinesHaveHardGap ? "Valda linjer hänger inte ihop" : "Starta kartering";
   referenceLineStatus.textContent = state.referenceLines.length
     ? state.mappingStarted && activeReachIds().length
       ? activeReachIds().length === 1
         ? `Aktiv sträcka låst: ${activeReachIds()[0]}`
         : `${activeReachIds().length} stödlinjer låsta som aktiv sträcka`
+      : selectedLinesHaveHardGap
+      ? `Största glappet är ${Math.round(selectedLineConnection.maxGap)} m. Avmarkera fel linje eller hämta en mindre kartvy.`
       : selectedLines.length
       ? `${selectedLines.length} stödlinje${selectedLines.length === 1 ? "" : "r"} vald${selectedLines.length === 1 ? "" : "a"}`
       : `${state.referenceLines.length} linje${state.referenceLines.length === 1 ? "" : "r"} hittad${state.referenceLines.length === 1 ? "" : "e"}. Bocka i det du vill kartera.`
@@ -2536,6 +2541,8 @@ function renderLists() {
     ? state.draftFieldReach.length > 1
       ? "Stödlinje redo"
       : "Ritar planerad sträcka"
+    : selectedLinesHaveHardGap
+      ? "Valda stödlinjer hänger inte ihop"
     : selectedLines.length
       ? "Linje vald"
     : "Ingen stödlinje vald";
