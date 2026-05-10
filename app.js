@@ -256,6 +256,7 @@ const fallbackObjectTypes = [
 ];
 
 const defaultMapCenter = [60.965, 16.44];
+const APP_VERSION_LABEL = "V2.1";
 const SUPPORT_LINE_MERGE_TOLERANCE_METERS = 10;
 const MANUAL_SUPPORT_LINE_GAP_TOLERANCE_METERS = 30;
 const MANUAL_SUPPORT_LINE_HARD_GAP_LIMIT_METERS = 250;
@@ -323,6 +324,7 @@ const mapHint = document.querySelector("#map-hint");
 const sideMapHint = document.querySelector("#side-map-hint");
 const lengthLabel = document.querySelector("#length-label");
 const gpsToggleButton = document.querySelector("#gps-toggle-button");
+const appVersionLabel = document.querySelector("#app-version-label");
 const debugLogButton = document.querySelector("#debug-log-button");
 const centerGpsButton = document.querySelector("#center-gps-button");
 const switchProjectButton = document.querySelector("#switch-project-button");
@@ -503,6 +505,11 @@ function installDebugLogCapture() {
 }
 
 installDebugLogCapture();
+
+if (appVersionLabel) {
+  appVersionLabel.textContent = APP_VERSION_LABEL;
+  appVersionLabel.title = `Aktuell appversion: ${APP_VERSION_LABEL}`;
+}
 
 function pathFromPoints(points) {
   return points.map((p, index) => `${index === 0 ? "M" : "L"}${p[0]},${p[1]}`).join(" ");
