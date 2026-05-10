@@ -258,6 +258,7 @@ const fallbackObjectTypes = [
 const defaultMapCenter = [60.965, 16.44];
 const SUPPORT_LINE_MERGE_TOLERANCE_METERS = 10;
 const MANUAL_SUPPORT_LINE_GAP_TOLERANCE_METERS = 30;
+const MANUAL_SUPPORT_LINE_HARD_GAP_LIMIT_METERS = 250;
 
 const state = {
   nextSectionNumber: 1,
@@ -3249,15 +3250,25 @@ function startMapping() {
   const selectedLines = selectedReferenceLines();
   if (selectedLines.length) {
     const connection = connectedReferenceLineGeometry(selectedLines);
-    if (connection.maxGap > MANUAL_SUPPORT_LINE_GAP_TOLERANCE_METERS) {
+    if (connection.maxGap > MANUAL_SUPPORT_LINE_HARD_GAP_LIMIT_METERS) {
       fieldStatusLabel.textContent = "Valda stödlinjer hänger inte ihop";
-      referenceLineStatus.textContent = `Största glappet är ${Math.round(connection.maxGap)} m. Välj om linjerna eller hämta en mindre kartvy.`;
+      referenceLineStatus.textContent = `Största glappet är ${Math.round(connection.maxGap)} m. Välj linjen som saknas eller hämta en mindre kartvy.`;
       console.warn("[InField reach] Valda stödlinjer kunde inte kopplas ihop säkert.", {
         selectedSupportLines: selectedReferenceLineIds(),
         maxGapMeters: connection.maxGap,
         toleranceMeters: MANUAL_SUPPORT_LINE_GAP_TOLERANCE_METERS,
+        hardLimitMeters: MANUAL_SUPPORT_LINE_HARD_GAP_LIMIT_METERS,
       });
       return;
+    }
+    if (connection.maxGap > MANUAL_SUPPORT_LINE_GAP_TOLERANCE_METERS) {
+      referenceLineStatus.textContent = `Valda stödlinjer har ett glapp på ${Math.round(connection.maxGap)} m. Kartering startas eftersom du valt linjerna manuellt.`;
+      console.warn("[InField reach] Valda stödlinjer har glapp men accepteras efter manuellt val.", {
+        selectedSupportLines: selectedReferenceLineIds(),
+        maxGapMeters: connection.maxGap,
+        warningToleranceMeters: MANUAL_SUPPORT_LINE_GAP_TOLERANCE_METERS,
+        hardLimitMeters: MANUAL_SUPPORT_LINE_HARD_GAP_LIMIT_METERS,
+      });
     }
     state.draftFieldReach = connection.points;
     state.activeReachGeometry = [...state.draftFieldReach];
