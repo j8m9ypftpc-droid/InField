@@ -2958,6 +2958,12 @@ async function fetchLantmaterietWaterwaysInView(testOnly = false) {
       return;
     }
     const lines = collectGeoJsonLines(data).map((line) => ({ ...line, license: LANTMATERIET_ATTRIBUTION }));
+    console.info("[InField LM fetch]", {
+      fetchedFeatures: data.features?.length ?? 0,
+      numberMatched: data.numberMatched ?? null,
+      renderedLines: lines.length,
+      renderedLineNames: lines.slice(0, 40).map((line) => safeReferenceLineName(line)),
+    });
     addReferenceLines(lines, "Lantmäteriet Hydrografi Direkt", { license: LANTMATERIET_ATTRIBUTION, fit: false, replaceExisting: true });
     if ((data.numberMatched ?? 0) > lines.length) {
       referenceLineStatus.textContent = `${lines.length} Lantmäteriet-linjer hämtade. Zooma in mer om du vill minska urvalet.`;
@@ -3793,7 +3799,7 @@ importReferenceLineButton.addEventListener("click", () => {
   referenceLineInput.click();
 });
 fetchOsmWaterwaysButton.addEventListener("click", fetchOsmWaterwaysInView);
-fetchLantmaterietWaterwaysButton?.addEventListener("click", fetchOsmWaterwaysInView);
+fetchLantmaterietWaterwaysButton?.addEventListener("click", () => fetchLantmaterietWaterwaysInView(false));
 toggleLantmaterietTokenButton?.addEventListener("click", toggleLantmaterietTokenVisibility);
 saveLantmaterietTokenButton?.addEventListener("click", saveLantmaterietToken);
 testLantmaterietTokenButton?.addEventListener("click", testLantmaterietCredentials);

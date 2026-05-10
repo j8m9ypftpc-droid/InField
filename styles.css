@@ -1044,6 +1044,32 @@ select,
   padding: 10px;
 }
 
+.reference-line-choice {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px;
+  align-items: start;
+  cursor: pointer;
+}
+
+.reference-line-choice input {
+  width: 18px;
+  height: 18px;
+  margin-top: 2px;
+  accent-color: var(--accent);
+}
+
+.reference-line-choice span {
+  display: grid;
+  gap: 3px;
+}
+
+.reference-line-choice small {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
 .object-actions {
   margin-bottom: 8px;
 }
