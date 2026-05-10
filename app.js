@@ -1458,7 +1458,7 @@ function toggleReferenceLineSelection(id) {
     return;
   }
   const ids = selectedReferenceLineIds();
-  setSelectedReferenceLineIds(ids.includes(id) ? [] : [id]);
+  setSelectedReferenceLineIds(ids.includes(id) ? ids.filter((selectedId) => selectedId !== id) : [...ids, id]);
   clearTemporaryDrawingState();
   activateSelectedReferenceLines({ fit: true });
 }
@@ -2680,7 +2680,7 @@ function addReferenceLines(lines, source = "", options = {}) {
       })
     )
     .filter((line) => line.points.length > 1);
-  const cleanLines = mergeConnectedReferenceLines(rawCleanLines);
+  const cleanLines = rawCleanLines;
   if (!cleanLines.length) {
     referenceLineStatus.textContent = "Hittade ingen linje i filen.";
     return;
@@ -3127,8 +3127,8 @@ async function fetchOsmWaterwaysInView() {
     const query = `
       [out:json][timeout:35];
       (
-        way["waterway"~"${OSM_WATERWAY_PATTERN}"](${bbox});
-        relation["waterway"~"${OSM_WATERWAY_PATTERN}"](${bbox});
+        way["waterway"](${bbox});
+        relation["waterway"](${bbox});
         relation["type"="waterway"](${bbox});
         relation["type"="route"]["route"~"^(water|waterway|river)$"](${bbox});
       );
