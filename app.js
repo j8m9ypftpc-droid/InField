@@ -256,7 +256,7 @@ const fallbackObjectTypes = [
 ];
 
 const defaultMapCenter = [60.965, 16.44];
-const APP_VERSION_LABEL = "V2.2";
+const APP_VERSION_LABEL = "V2.2.2";
 const SUPPORT_LINE_MERGE_TOLERANCE_METERS = 10;
 const MANUAL_SUPPORT_LINE_GAP_TOLERANCE_METERS = 30;
 const MANUAL_SUPPORT_LINE_HARD_GAP_LIMIT_METERS = 250;
@@ -1014,6 +1014,12 @@ function showProjectPicker() {
 
 function persistActiveSectionAsDraft() {
   if (!state.activeSection) return null;
+  if (!hasSectionGeometry(state.activeSection)) {
+    state.activeSection = null;
+    state.nextSectionNumber = nextSectionNumber();
+    console.info("[InField reach] Tom aktiv delsträcka släpptes utan att sparas som insamlad sträcka.");
+    return null;
+  }
   syncFormToProtocol({ save: false });
   const section = {
     ...state.activeSection,
@@ -1091,13 +1097,14 @@ function switchProject() {
 function saveProject(options = {}) {
   if (options.syncProtocol !== false) syncFormToProtocol({ save: false });
   syncProjectMetaFromForm();
+  state.sections = cleanSavedSections(state.sections);
   state.nextSectionNumber = nextSectionNumber();
   const rememberedSupportLineIds = rememberSupportLineSelection();
   const payload = {
     watercourse: state.watercourse,
     nextSectionNumber: state.nextSectionNumber,
     activeSection: state.activeSection,
-    sections: state.sections,
+    sections: cleanSavedSections(state.sections),
     objects: state.objects,
     photos: state.photos,
     fieldPackages: state.fieldPackages,
@@ -1125,6 +1132,35 @@ function nextSectionNumber() {
   return Math.max(0, ...numbers) + 1;
 }
 
+function hasSectionGeometry(section) {
+  return normalizePoints(section?.points ?? []).length > 1;
+}
+
+function cleanSavedSections(sections = []) {
+  return sections.filter(hasSectionGeometry);
+}
+
+function finishLoadedActiveSectionIfReal() {
+  if (!state.activeSection) return;
+  if (!hasSectionGeometry(state.activeSection)) {
+    state.activeSection = null;
+    state.nextSectionNumber = nextSectionNumber();
+    return;
+  }
+  const section = {
+    ...state.activeSection,
+    points: expandedSectionPoints(state.activeSection),
+    status: "finished",
+    editingExisting: false,
+    startConfirmed: true,
+  };
+  const existingIndex = state.sections.findIndex((item) => item.id === section.id);
+  if (existingIndex >= 0) state.sections[existingIndex] = section;
+  else state.sections.push(section);
+  state.activeSection = null;
+  state.nextSectionNumber = nextSectionNumber();
+}
+
 function supportLineIdsFromPayload(payload) {
   const selectedIds = payload.selectedReferenceLineIds ?? (payload.selectedReferenceLineId ? [payload.selectedReferenceLineId] : []);
   const activeIds = Array.isArray(payload.activeSegmentIds) ? payload.activeSegmentIds : payload.activeSegmentId ? [payload.activeSegmentId] : [];
@@ -1133,6 +1169,7 @@ function supportLineIdsFromPayload(payload) {
 
 function enterProjectReviewMode() {
   const rememberedSupportLineIds = rememberSupportLineSelection(state.lastSupportLineIds ?? []);
+  finishLoadedActiveSectionIfReal();
   state.mappingStarted = false;
   setSelectedReferenceLineIds([]);
   clearActiveReachLock();
@@ -1180,10 +1217,12 @@ function openWatercourse(name, saveCurrent = true, options = {}) {
   const openMode = options.mode ?? "review";
   const cleanName = name.trim() || "Nytt vattendrag";
   if (saveCurrent && state.activeSection) {
-    syncFormToProtocol();
-    state.activeSection.status = "finished";
-    state.sections.push(state.activeSection);
-    state.activeSection = null;
+    if (hasSectionGeometry(state.activeSection)) {
+      persistActiveSectionAsDraft();
+    } else {
+      state.activeSection = null;
+      state.nextSectionNumber = nextSectionNumber();
+    }
   }
   if (saveCurrent) saveProject();
   state.watercourse = cleanName;
@@ -1193,7 +1232,7 @@ function openWatercourse(name, saveCurrent = true, options = {}) {
   if (saved) {
     const payload = JSON.parse(saved);
     state.activeSection = payload.activeSection ? normalizeSectionAttributes(payload.activeSection) : null;
-    state.sections = (payload.sections ?? []).map(normalizeSectionAttributes);
+    state.sections = cleanSavedSections((payload.sections ?? []).map(normalizeSectionAttributes));
     state.objects = (payload.objects ?? []).map(normalizeObjectGeometry);
     state.photos = payload.photos ?? [];
     state.fieldPackages = (payload.fieldPackages ?? []).map(normalizeFieldPackage);
