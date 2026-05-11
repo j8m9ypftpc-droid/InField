@@ -265,16 +265,16 @@ const protocolGroups = [
         helpText: "Ange ett scenario för återställd eller höjd bestämmande sektion. Detta är fältstöd, inte projektering.",
         showIf: (a) => a.mataInskarningskvot === "Ja",
       },
-      { key: "nuvarandeBsOverThalweg", label: "Nuvarande BS över thalweg", type: "computed", showIf: (a) => a.mataInskarningskvot === "Ja" },
-      { key: "vattenytaOverThalweg", label: "Vattenyta vid inmätning över thalweg", type: "computed", showIf: (a) => a.mataInskarningskvot === "Ja" },
-      { key: "foreslagenBsOverThalweg", label: "Föreslagen BS över thalweg", type: "computed", showIf: (a) => a.mataInskarningskvot === "Ja" },
-      { key: "foreslagenBsAndring", label: "Föreslagen höjning/sänkning", type: "computed", showIf: (a) => a.mataInskarningskvot === "Ja" },
-      { key: "foreslagenBsRelVattenyta", label: "Föreslagen BS relativt vattenyta", type: "computed", showIf: (a) => a.mataInskarningskvot === "Ja" },
-      { key: "bankfullDjup", label: "Bankfulldjup", type: "computed", showIf: (a) => a.mataInskarningskvot === "Ja" },
-      { key: "foreslagenBsRelBankfull", label: "Föreslagen BS relativt bankfull", type: "computed", showIf: (a) => a.mataInskarningskvot === "Ja" },
-      { key: "svamplanshojdOverThalweg", label: "Svämplanshöjd över thalweg", type: "computed", showIf: (a) => a.mataInskarningskvot === "Ja" },
-      { key: "inskarningskvot", label: "Beräknad inskärningskvot", type: "computed", showIf: (a) => a.mataInskarningskvot === "Ja" },
-      { key: "foreslagenBsRelSvamplan", label: "Föreslagen BS relativt svämplan", type: "computed", showIf: (a) => a.mataInskarningskvot === "Ja" },
+      { key: "nuvarandeBsOverThalweg", label: "Nuvarande BS över thalweg", type: "computed", unit: "m", showIf: (a) => a.mataInskarningskvot === "Ja" },
+      { key: "vattenytaOverThalweg", label: "Vattenyta vid inmätning över thalweg", type: "computed", unit: "m", showIf: (a) => a.mataInskarningskvot === "Ja" },
+      { key: "foreslagenBsOverThalweg", label: "Föreslagen BS över thalweg", type: "computed", unit: "m", showIf: (a) => a.mataInskarningskvot === "Ja" },
+      { key: "foreslagenBsAndring", label: "Föreslagen höjning/sänkning", type: "computed", unit: "m", showIf: (a) => a.mataInskarningskvot === "Ja" },
+      { key: "foreslagenBsRelVattenyta", label: "Föreslagen BS relativt vattenyta", type: "computed", unit: "m", showIf: (a) => a.mataInskarningskvot === "Ja" },
+      { key: "bankfullDjup", label: "Bankfulldjup", type: "computed", unit: "m", showIf: (a) => a.mataInskarningskvot === "Ja" },
+      { key: "foreslagenBsRelBankfull", label: "Föreslagen BS relativt bankfull", type: "computed", unit: "m", showIf: (a) => a.mataInskarningskvot === "Ja" },
+      { key: "svamplanshojdOverThalweg", label: "Beräknad svämplansnivå över thalweg", type: "computed", unit: "m", highlight: true, showIf: (a) => a.mataInskarningskvot === "Ja" },
+      { key: "inskarningskvot", label: "Beräknad inskärningskvot", type: "computed", highlight: true, showIf: (a) => a.mataInskarningskvot === "Ja" },
+      { key: "foreslagenBsRelSvamplan", label: "Föreslagen BS relativt svämplan", type: "computed", unit: "m", showIf: (a) => a.mataInskarningskvot === "Ja" },
       {
         key: "bsScenarioTolkning",
         label: "Tolkning och varningar",
@@ -370,7 +370,7 @@ const fallbackObjectTypes = [
 ];
 
 const defaultMapCenter = [60.965, 16.44];
-const APP_VERSION_LABEL = "V2.2.11";
+const APP_VERSION_LABEL = "V2.2.13";
 const SUPPORT_LINE_MERGE_TOLERANCE_METERS = 10;
 const MANUAL_SUPPORT_LINE_GAP_TOLERANCE_METERS = 30;
 const MANUAL_SUPPORT_LINE_HARD_GAP_LIMIT_METERS = 250;
@@ -416,9 +416,11 @@ const mapToolbar = document.querySelector("#map-toolbar");
 const toolMenuButton = document.querySelector("#tool-menu-button");
 const mapZoomInButton = document.querySelector("#map-zoom-in");
 const mapZoomOutButton = document.querySelector("#map-zoom-out");
+const sidePanelToggleButton = document.querySelector("#side-panel-toggle");
 const basemapSelect = document.querySelector("#basemap-select");
 const themeToggleButton = document.querySelector("#theme-toggle-button");
 const startScreen = document.querySelector("#start-screen");
+const appShell = document.querySelector("#app-shell");
 const splashCover = document.querySelector("#splash-cover");
 const projectList = document.querySelector("#project-list");
 const savedProjectSelect = document.querySelector("#saved-project-select");
@@ -1078,6 +1080,21 @@ function readSavedProject(key) {
   } catch {
     return null;
   }
+}
+
+function refreshMapSize() {
+  if (!state.backgroundMap) return;
+  window.setTimeout(() => state.backgroundMap.invalidateSize(), 210);
+}
+
+function setSidePanelCollapsed(collapsed) {
+  appShell?.classList.toggle("side-panel-collapsed", collapsed);
+  if (sidePanelToggleButton) {
+    sidePanelToggleButton.textContent = collapsed ? "Visa panel" : "Dölj panel";
+    sidePanelToggleButton.setAttribute("aria-expanded", String(!collapsed));
+    sidePanelToggleButton.title = collapsed ? "Visa sidopanelen" : "Dölj sidopanelen";
+  }
+  refreshMapSize();
 }
 
 function renderProjectList() {
@@ -2306,6 +2323,17 @@ function renderProtocolField(field) {
     return wrapper;
   }
 
+  if (field.type === "computed") {
+    const output = document.createElement("div");
+    output.className = `computed-result${field.highlight ? " highlight" : ""}`;
+    const value = state.activeSection?.attributes?.[field.key] ?? "";
+    const valueText = value || "-";
+    output.innerHTML = `<span>${valueText}</span>${field.unit ? `<small>${field.unit}</small>` : ""}`;
+    wrapper.append(output);
+    appendHelpText();
+    return wrapper;
+  }
+
   if (field.type === "computedText") {
     const output = document.createElement("div");
     output.className = "computed-text";
@@ -2318,13 +2346,9 @@ function renderProtocolField(field) {
 
   const input = document.createElement(field.type === "textarea" ? "textarea" : field.type === "select" ? "select" : "input");
   input.dataset.protocolInput = field.key;
-  if (field.type === "computed") {
-    input.readOnly = true;
-    input.type = "text";
-  }
   if (field.type === "textarea") input.rows = 4;
   if (field.type === "number" || field.type === "decimal") input.type = "number";
-  if (field.type === "decimal") input.step = "0.01";
+  if (field.type === "decimal") input.step = "0.001";
   if (field.type === "text") input.type = "text";
   if (field.type === "select") {
     const empty = document.createElement("option");
@@ -2418,6 +2442,10 @@ function updateCalculatedProtocolFields() {
   const attrs = state.activeSection.attributes;
   const numeric = (value) => Number(String(value ?? "").replace(",", "."));
   const rounded = (value, digits = 2) => (Number.isFinite(value) ? value.toFixed(digits) : "");
+  const formatElevation = (value) => {
+    const parsed = numeric(value);
+    return Number.isFinite(parsed) ? parsed.toFixed(2) : value;
+  };
   const setValue = (key, value, digits = 2) => {
     attrs[key] = rounded(value, digits);
   };
@@ -2466,6 +2494,9 @@ function updateCalculatedProtocolFields() {
     setValue("foreslagenBsRelBankfull", hasProposedBs && hasBankfull ? bankfull - proposedBs : NaN);
     setValue("svamplanshojdOverThalweg", floodplainDepth);
     setValue("foreslagenBsRelSvamplan", hasProposedBs && hasFloodplain ? floodplain - proposedBs : NaN);
+    ["hojdThalweg", "hojdNuvarandeBs", "hojdVattenytaInmatning", "hojdBankfull", "hojdSvamplanRecentTerrass", "hojdForeslagenBs"].forEach((key) => {
+      if (attrs[key] !== "") attrs[key] = formatElevation(attrs[key]);
+    });
 
     if (!hasBankfull || !hasFloodplain) {
       attrs.inskarningskvot = "";
@@ -4329,6 +4360,9 @@ toolMenuButton.addEventListener("click", () => {
 });
 mapZoomInButton.addEventListener("click", () => state.backgroundMap?.zoomIn());
 mapZoomOutButton.addEventListener("click", () => state.backgroundMap?.zoomOut());
+sidePanelToggleButton?.addEventListener("click", () => {
+  setSidePanelCollapsed(!appShell?.classList.contains("side-panel-collapsed"));
+});
 basemapSelect?.addEventListener("change", () => setBaseMap(basemapSelect.value));
 debugLogButton?.addEventListener("click", copyDebugLog);
 themeToggleButton?.addEventListener("click", () => {

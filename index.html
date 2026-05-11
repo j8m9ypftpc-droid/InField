@@ -53,7 +53,7 @@
         </div>
       </div>
     </section>
-    <main class="app-shell">
+    <main id="app-shell" class="app-shell">
       <section class="map-pane" aria-label="Karta">
         <div id="background-map" aria-hidden="true"></div>
         <button id="tool-menu-button" class="tool-menu-button" type="button" aria-expanded="false">Verktyg</button>
@@ -118,7 +118,7 @@
         </form>
       </dialog>
 
-      <aside class="side-pane" aria-label="Protokoll">
+      <aside id="side-panel" class="side-pane" aria-label="Protokoll">
         <header class="project-header">
           <div>
             <p class="eyebrow" id="watercourse-label">Bresiljeån</p>
@@ -130,7 +130,7 @@
                 <span class="switch-track"><span class="switch-thumb"></span></span>
                 <span class="switch-label">GPS</span>
               </button>
-              <span id="app-version-label" class="app-version-label" title="Aktuell appversion">V2.2.11</span>
+              <span id="app-version-label" class="app-version-label" title="Aktuell appversion">V2.2.13</span>
               <button id="debug-log-button" class="debug-log-button hidden" type="button" aria-live="polite">Bugglogg</button>
             </div>
             <button id="center-gps-button" class="quiet-button">Centrera</button>
@@ -267,10 +267,13 @@
 
 
       </aside>
+      <button id="side-panel-toggle" class="side-panel-toggle" type="button" aria-expanded="true" aria-controls="side-panel">
+        Dölj panel
+      </button>
     </main>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://unpkg.com/jszip@3.10.1/dist/jszip.min.js"></script>
-    <script src="./app.js?v=2.2.11"></script>
+    <script src="./app.js?v=2.2.13"></script>
   </body>
 </html>

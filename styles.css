@@ -172,6 +172,12 @@ input {
   min-height: 100vh;
   display: grid;
   grid-template-columns: minmax(0, 1fr) 420px;
+  overflow: hidden;
+  transition: grid-template-columns 180ms ease;
+}
+
+.app-shell.side-panel-collapsed {
+  grid-template-columns: minmax(0, 1fr) 0;
 }
 
 .map-pane {
@@ -675,6 +681,41 @@ input {
   min-height: 100vh;
   padding: 20px;
   overflow: auto;
+  transition:
+    transform 180ms ease,
+    opacity 180ms ease;
+}
+
+.app-shell.side-panel-collapsed .side-pane {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(100%);
+}
+
+.side-panel-toggle {
+  position: fixed;
+  top: 50%;
+  right: 420px;
+  z-index: 40;
+  min-width: 44px;
+  min-height: 48px;
+  padding: 8px 10px;
+  border-radius: 8px 0 0 8px;
+  border: 1px solid var(--line);
+  border-right: 0;
+  background: var(--panel);
+  color: var(--ink);
+  box-shadow: 0 10px 24px var(--shadow);
+  font-weight: 900;
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  transform: translateY(-50%);
+}
+
+.app-shell.side-panel-collapsed .side-panel-toggle {
+  right: 12px;
+  border-radius: 8px;
+  border-right: 1px solid var(--line);
 }
 
 .project-header,
@@ -990,6 +1031,37 @@ select,
   line-height: 1.4;
 }
 
+.computed-result {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: color-mix(in srgb, var(--panel) 88%, var(--bg));
+  color: var(--ink);
+  font-weight: 800;
+}
+
+.computed-result span {
+  font-size: 18px;
+}
+
+.computed-result small {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.computed-result.highlight {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 22%, var(--panel));
+}
+
+.computed-result.highlight span {
+  font-size: 24px;
+}
+
 .token-settings {
   margin: 10px 0;
 }
@@ -1203,6 +1275,7 @@ select,
 @media (max-width: 900px) {
   .app-shell {
     grid-template-columns: 1fr;
+    grid-template-rows: minmax(48vh, auto) auto;
   }
 
   .map-pane {
@@ -1217,6 +1290,32 @@ select,
 
   .side-pane {
     min-height: 52vh;
+  }
+
+  .app-shell.side-panel-collapsed {
+    grid-template-columns: 1fr;
+    grid-template-rows: 100vh 0;
+  }
+
+  .app-shell.side-panel-collapsed .map-pane,
+  .app-shell.side-panel-collapsed #map {
+    min-height: 100vh;
+  }
+
+  .app-shell.side-panel-collapsed .side-pane {
+    display: none;
+    transform: translateY(100%);
+  }
+
+  .side-panel-toggle {
+    top: auto;
+    right: 14px;
+    bottom: 14px;
+    min-height: 42px;
+    writing-mode: horizontal-tb;
+    transform: none;
+    border: 1px solid var(--line);
+    border-radius: 8px;
   }
 }
 
